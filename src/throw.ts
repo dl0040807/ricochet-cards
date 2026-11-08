@@ -18,8 +18,8 @@ import {
 import { scan } from './colliders.js';
 
 // Tuning knobs (PRD: tuned on the headset)
-export const THROW_ASSIST = 3.0; // room-mode release-speed multiplier
-export const MAX_SPEED = 15; // m/s cap
+export const THROW_ASSIST = 2.0; // room-mode release-speed multiplier
+export const MAX_SPEED = 12; // m/s cap
 const GRIP_ON = 0.025; // fingertips closer than this = grip
 const GRIP_OFF = 0.05; // fingertips farther than this = release
 const DECK_RADIUS = 0.12; // grip must start this close to the deck
@@ -28,7 +28,7 @@ const SAMPLES = 6;
 const MIN_THROW = 0.8; // m/s: slower fingers-open is a wind-up slip, not a throw
 const LOST_GRACE = 0.4; // s of lost tracking before the card is put back
 const SLIP_GRACE = 0.5; // s of open fingers without a snap before the card is put back
-const AIM_ASSIST = 0.35; // 0..1 blend of throw direction toward where the head faces
+const AIM_ASSIST = 0; // 0..1 blend of throw direction toward where the head faces
 
 const CARD_W = 0.06, CARD_H = 0.09, CARD_T = 0.006;
 const cardGeo = new BoxGeometry(CARD_W, CARD_H, CARD_T);
