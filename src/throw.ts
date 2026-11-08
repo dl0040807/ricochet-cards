@@ -3,6 +3,7 @@ import {
   Mesh,
   MeshStandardMaterial,
   CanvasTexture,
+  TorusGeometry,
   Entity,
   Object3D,
   PhysicsBody,
@@ -83,6 +84,14 @@ export class ThrowSystem extends createSystem({}) {
 
   init() {
     const w = this.world as World;
+    // visible markers: the deck you grab from, and the target ring on the far wall
+    const deck = new Mesh(cardGeo, new MeshStandardMaterial({ color: 0xffd34d, emissive: 0x553d00 }));
+    deck.position.copy(DECK_POS);
+    deck.rotation.x = -0.4;
+    w.createTransformEntity(deck);
+    const ring = new Mesh(new TorusGeometry(TARGET_R, 0.012, 12, 48), new MeshStandardMaterial({ color: 0xff3d71, emissive: 0xaa1040 }));
+    ring.position.copy(TARGET);
+    w.createTransformEntity(ring);
     for (let i = 0; i < 2; i++) {
       const hand = w.renderer.xr.getHand(i) as unknown as Object3D & {
         joints: Record<string, Object3D>;
