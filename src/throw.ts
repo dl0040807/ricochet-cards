@@ -18,8 +18,8 @@ import {
 import { scan } from './colliders.js';
 
 // Tuning knobs (PRD: tuned on the headset)
-export const THROW_ASSIST = 2.0; // room-mode release-speed multiplier
-export const MAX_SPEED = 12; // m/s cap
+export const THROW_ASSIST = 3.0; // room-mode release-speed multiplier
+export const MAX_SPEED = 15; // m/s cap
 const GRIP_ON = 0.025; // fingertips closer than this = grip
 const GRIP_OFF = 0.04; // fingertips farther than this = release
 const DECK_RADIUS = 0.12; // grip must start this close to the deck
@@ -74,6 +74,7 @@ export class ThrowSystem extends createSystem({}) {
   private heldPaint?: (r: number) => void;
   private flights: Flight[] = [];
   private arena = false;
+  private immersiveAt = -1;
   private v = new Vector3();
   score = 0;
   best = 0;
@@ -126,7 +127,10 @@ export class ThrowSystem extends createSystem({}) {
 
   update(dt: number, time: number) {
     this.updateFlights(dt, time);
-    if (!this.arena && time > TABLE_AFTER && scan.colliders === 0) {
+    const immersive = !String(this.world.visibilityState).toLowerCase().startsWith('non');
+    if (immersive && this.immersiveAt < 0) this.immersiveAt = time; // count from AR entry, not app start
+    if (!immersive) this.immersiveAt = -1;
+    if (!this.arena && this.immersiveAt >= 0 && time - this.immersiveAt > TABLE_AFTER && scan.colliders === 0) {
       this.arena = true; // no room scan: table mode fallback
       this.addTestArena(this.world as World);
     }
@@ -184,6 +188,7 @@ export class ThrowSystem extends createSystem({}) {
     }
     v.multiplyScalar(THROW_ASSIST);
     if (v.length() > MAX_SPEED) v.setLength(MAX_SPEED);
+    console.log(`[throw] release speed=${v.length().toFixed(2)} m/s scanColliders=${scan.colliders} arena=${this.arena}`);
 
     this.held = undefined;
     const w = this.world as World;
