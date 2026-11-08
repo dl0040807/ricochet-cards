@@ -40,6 +40,8 @@ const TARGET = new Vector3(0, 1.4, -2.9); // ponytail: fixed; pinch-to-place com
 const TARGET_R = 0.15;
 const BULL_R = 0.04;
 const BOUNCE_DV = 0.8; // m/s velocity change not explained by gravity = a bounce
+const FLOOR_Y = 0.09; // card center this low = lying on the floor (long edge is 9 cm)
+const WARMUP = 3; // frames before the physics velocity is trustworthy (first reads are 0)
 const FLIGHT_MAX = 6; // s
 const GRAVITY = -9.81;
 const TABLE_AFTER = 3; // s without a room scan -> table mode
@@ -67,7 +69,7 @@ function makeCard(): { mesh: Mesh; paint: (rank: number) => void } {
 
 type Flight = {
   e: Entity; mesh: Mesh; paint: (r: number) => void;
-  prev: Vector3; started: number; bounces: number; done: boolean; removeAt: number;
+  prev: Vector3; age: number; started: number; bounces: number; done: boolean; removeAt: number;
 };
 
 type Sample = { p: Vector3; t: number };
@@ -237,7 +239,7 @@ export class ThrowSystem extends createSystem({}) {
       })
       .addComponent(PhysicsBody, { state: PhysicsState.Dynamic })
       .addComponent(PhysicsManipulation, { linearVelocity: [v.x, v.y, v.z] });
-    this.flights.push({ e, mesh: card, paint: this.heldPaint!, prev: v.clone(), started: -1, bounces: 0, done: false, removeAt: 0 });
+    this.flights.push({ e, mesh: card, paint: this.heldPaint!, prev: v.clone(), age: 0, started: -1, bounces: 0, done: false, removeAt: 0 });
   }
 
   private updateFlights(dt: number, time: number) {
@@ -252,7 +254,7 @@ export class ThrowSystem extends createSystem({}) {
       this.v.set(vv[0], vv[1], vv[2]);
       const p = f.mesh.position;
 
-      if (p.y < 0.04) { this.finish(f, time, 0); continue; } // floor ends the throw, 0 points
+      if (p.y < FLOOR_Y) { this.finish(f, time, 0); continue; } // floor ends the throw, 0 points
       if (p.distanceTo(TARGET) < TARGET_R) {
         const bonus = p.distanceTo(TARGET) < BULL_R ? 5 : 0;
         f.e.removeComponent(PhysicsBody); // card sticks where it hit
@@ -262,11 +264,13 @@ export class ThrowSystem extends createSystem({}) {
       if (time - f.started > FLIGHT_MAX) { this.finish(f, time, 0); continue; }
 
       // bounce = velocity change beyond what gravity explains
+      if (++f.age <= WARMUP) { f.prev.copy(this.v); continue; }
       if (f.prev.lengthSq() > 0.09) {
         const dvx = this.v.x - f.prev.x, dvz = this.v.z - f.prev.z;
         const dvy = this.v.y - f.prev.y - GRAVITY * dt;
-        if (Math.hypot(dvx, dvy, dvz) > BOUNCE_DV) {
+        if (Math.hypot(dvx, dvy, dvz) > BOUNCE_DV && p.y > FLOOR_Y + 0.06) { // a floor hit ends the throw, it isn't a rank-up
           f.bounces++;
+          console.log(`[throw] bounce#${f.bounces} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)} v=${this.v.x.toFixed(1)},${this.v.y.toFixed(1)},${this.v.z.toFixed(1)} dv=${Math.hypot(dvx, dvy, dvz).toFixed(2)}`);
           f.paint(Math.min(f.bounces, 7));
         }
       }
