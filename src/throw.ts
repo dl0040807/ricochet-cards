@@ -21,10 +21,14 @@ import { scan } from './colliders.js';
 export const THROW_ASSIST = 3.0; // room-mode release-speed multiplier
 export const MAX_SPEED = 15; // m/s cap
 const GRIP_ON = 0.025; // fingertips closer than this = grip
-const GRIP_OFF = 0.04; // fingertips farther than this = release
+const GRIP_OFF = 0.05; // fingertips farther than this = release
 const DECK_RADIUS = 0.12; // grip must start this close to the deck
 const DECK_POS = new Vector3(0.25, 1.0, -0.35); // ponytail: fixed point, follow right hand later
-const SAMPLES = 5;
+const SAMPLES = 6;
+const MIN_THROW = 0.8; // m/s: slower fingers-open is a wind-up slip, not a throw
+const LOST_GRACE = 0.4; // s of lost tracking before the card is put back
+const SLIP_GRACE = 0.5; // s of open fingers without a snap before the card is put back
+const AIM_ASSIST = 0.35; // 0..1 blend of throw direction toward where the head faces
 
 const CARD_W = 0.06, CARD_H = 0.09, CARD_T = 0.006;
 const cardGeo = new BoxGeometry(CARD_W, CARD_H, CARD_T);
@@ -75,6 +79,9 @@ export class ThrowSystem extends createSystem({}) {
   private flights: Flight[] = [];
   private arena = false;
   private immersiveAt = -1;
+  private lostAt = -1;
+  private openAt = -1;
+  private fwd = new Vector3();
   private v = new Vector3();
   score = 0;
   best = 0;
@@ -137,7 +144,15 @@ export class ThrowSystem extends createSystem({}) {
     const hand = this.right();
     const idx = hand?.joints['index-finger-tip'];
     const mid = hand?.joints['middle-finger-tip'];
-    if (!hand || !idx || !mid) return this.drop();
+    if (!hand || !idx || !mid) {
+      // hand briefly out of view while winding up: keep the card for a moment
+      if (this.held) {
+        if (this.lostAt < 0) this.lostAt = time;
+        if (time - this.lostAt > LOST_GRACE) this.drop();
+      }
+      return;
+    }
+    this.lostAt = -1;
 
     const { a, b, w, dir } = this.tmp;
     idx.getWorldPosition(a);
@@ -158,10 +173,18 @@ export class ThrowSystem extends createSystem({}) {
       dir.subVectors(w, dir).normalize();
       this.held.quaternion.copy(this.q.setFromUnitVectors(this.up, dir));
     }
-    this.samples.push({ p: w.clone(), t: time }); // ponytail: allocs 1 Vector3/frame, pool if GC hitches
+    // sample the wrist: it doesn't jitter when the fingers open (fall back to the fingertip midpoint)
+    const ref = wrist ? wrist.getWorldPosition(this.tmp.dir) : w;
+    this.samples.push({ p: ref.clone(), t: time }); // ponytail: allocs 1 Vector3/frame, pool if GC hitches
     if (this.samples.length > SAMPLES) this.samples.shift();
 
-    if (gap > GRIP_OFF) this.release();
+    if (gap > GRIP_OFF) {
+      if (this.openAt < 0) this.openAt = time;
+      const v = this.velocity();
+      (this.world as World).camera.getWorldDirection(this.fwd);
+      if (v.length() >= MIN_THROW && v.dot(this.fwd) > 0) this.release();
+      else if (time - this.openAt > SLIP_GRACE) this.drop(); // opened without a snap: put it back
+    } else this.openAt = -1;
   }
 
   private grab() {
@@ -176,21 +199,33 @@ export class ThrowSystem extends createSystem({}) {
     if (!this.held) return;
     this.held.removeFromParent();
     this.held = undefined;
+    this.openAt = this.lostAt = -1;
+  }
+
+  private velocity() {
+    const s = this.samples;
+    const out = this.tmp.mid.set(0, 0, 0);
+    const n = s.length;
+    if (n >= 2) {
+      const a = s[Math.max(0, n - 4)], b = s[n - 1]; // last ~3 frames
+      const dt = b.t - a.t;
+      if (dt > 0) out.subVectors(b.p, a.p).divideScalar(dt);
+    }
+    return out;
   }
 
   private release() {
     const card = this.held!;
-    const v = new Vector3();
-    const s = this.samples;
-    if (s.length >= 2) {
-      const dt = s[s.length - 1].t - s[0].t;
-      if (dt > 0) v.subVectors(s[s.length - 1].p, s[0].p).divideScalar(dt);
-    }
+    const v = this.velocity().clone();
+    (this.world as World).camera.getWorldDirection(this.fwd);
+    const speed = v.length();
+    if (speed > 0) v.normalize().lerp(this.fwd, AIM_ASSIST).setLength(speed); // steer toward where you face
     v.multiplyScalar(THROW_ASSIST);
     if (v.length() > MAX_SPEED) v.setLength(MAX_SPEED);
     console.log(`[throw] release speed=${v.length().toFixed(2)} m/s scanColliders=${scan.colliders} arena=${this.arena}`);
 
     this.held = undefined;
+    this.openAt = this.lostAt = -1;
     const w = this.world as World;
     card.removeFromParent(); // createTransformEntity re-parents it into the scene
     const e = w.createTransformEntity(card)
