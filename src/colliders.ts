@@ -1,5 +1,8 @@
 import {
   Box3,
+  BoxGeometry,
+  MeshBasicMaterial,
+  Object3D,
   Mesh,
   PhysicsBody,
   PhysicsShape,
@@ -11,7 +14,7 @@ import {
 } from '@iwsdk/core';
 
 // How many real-room surfaces became colliders. throw.ts falls back to table mode when 0.
-export const scan = { colliders: 0 };
+export const scan = { colliders: 0, proxies: [] as Object3D[] }; // proxies: invisible boxes for pinch-to-place raycasts
 
 const HARD_PLANE = new Set(['wall', 'ceiling', 'floor', 'table', 'desk', 'door', 'screen', 'shelf', 'storage']);
 const THICK = 0.1; // thick box so a fast card can't tunnel through a zero-thickness plane
@@ -55,5 +58,10 @@ export class SceneColliderSystem extends createSystem({
     e.addComponent(PhysicsShape, { shape: 'Box', dimensions: dims, restitution: 0.85, friction: 0.3 });
     e.addComponent(PhysicsBody, { state: PhysicsState.Static });
     scan.colliders++;
+    const proxy = new Mesh(new BoxGeometry(...dims), new MeshBasicMaterial());
+    proxy.visible = false; // Raycaster still hits invisible meshes
+    proxy.position.copy(worldCenter);
+    this.world.scene.add(proxy);
+    scan.proxies.push(proxy);
   }
 }

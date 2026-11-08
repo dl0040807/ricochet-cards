@@ -4,6 +4,7 @@ import {
   MeshStandardMaterial,
   CanvasTexture,
   TorusGeometry,
+  Raycaster,
   Entity,
   Object3D,
   PhysicsBody,
@@ -36,8 +37,9 @@ const cardGeo = new BoxGeometry(CARD_W, CARD_H, CARD_T);
 // PRD rank ladder: bounces -> label / points
 const LABELS = ['2', '5', '8', '10', 'J', 'Q', 'K', 'A'];
 const POINTS = [2, 5, 8, 10, 11, 12, 13, 20];
-const TARGET = new Vector3(0, 1.4, -2.9); // ponytail: fixed; pinch-to-place comes next
+const TARGET = new Vector3(0, 1.4, -2.9); // default until the player pinches a wall
 const TARGET_R = 0.15;
+const PINCH_ON = 0.02; // thumb-index gap that counts as a pinch
 const BULL_R = 0.04;
 const BOUNCE_DV = 0.8; // m/s velocity change not explained by gravity = a bounce
 const FLOOR_Y = 0.09; // card center this low = lying on the floor (long edge is 9 cm)
@@ -84,6 +86,11 @@ export class ThrowSystem extends createSystem({}) {
   private lostAt = -1;
   private openAt = -1;
   private fwd = new Vector3();
+  private ring!: Mesh;
+  private pinching = false;
+  private ray = new Raycaster();
+  private ndir = new Vector3();
+  private tp = new Vector3();
   private v = new Vector3();
   score = 0;
   best = 0;
@@ -102,6 +109,7 @@ export class ThrowSystem extends createSystem({}) {
     const ring = new Mesh(new TorusGeometry(TARGET_R, 0.012, 12, 48), new MeshStandardMaterial({ color: 0xff3d71, emissive: 0xaa1040 }));
     ring.position.copy(TARGET);
     w.createTransformEntity(ring);
+    this.ring = ring;
     for (let i = 0; i < 2; i++) {
       const hand = w.renderer.xr.getHand(i) as unknown as Object3D & {
         joints: Record<string, Object3D>;
@@ -121,6 +129,7 @@ export class ThrowSystem extends createSystem({}) {
         new MeshStandardMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.15 }),
       );
       m.position.set(...pos);
+      scan.proxies.push(m);
       w.createTransformEntity(m)
         .addComponent(PhysicsShape, { shape: 'Box', dimensions: size, restitution: 0.85, friction: 0.3 })
         .addComponent(PhysicsBody, { state: PhysicsState.Static });
@@ -162,6 +171,15 @@ export class ThrowSystem extends createSystem({}) {
     const gap = a.distanceTo(b);
     w.copy(a).add(b).multiplyScalar(0.5);
 
+    // pinch a wall (thumb + index, away from the deck) to pin the target ring there
+    const thumb = hand.joints['thumb-tip'];
+    if (thumb && !this.held) {
+      thumb.getWorldPosition(this.tp);
+      const pinch = this.tp.distanceTo(a) < PINCH_ON && w.distanceTo(DECK_POS) > DECK_RADIUS * 2;
+      if (pinch && !this.pinching) this.placeTarget(hand, a);
+      this.pinching = pinch;
+    }
+
     if (!this.held) {
       if (gap < GRIP_ON && w.distanceTo(DECK_POS) < DECK_RADIUS) this.grab();
       return;
@@ -187,6 +205,21 @@ export class ThrowSystem extends createSystem({}) {
       if (v.length() >= MIN_THROW && v.dot(this.fwd) > 0) this.release();
       else if (time - this.openAt > SLIP_GRACE) this.drop(); // opened without a snap: put it back
     } else this.openAt = -1;
+  }
+
+  private placeTarget(hand: { joints: Record<string, Object3D> }, tip: Vector3) {
+    const wrist = hand.joints['wrist'];
+    if (!wrist) return;
+    wrist.getWorldPosition(this.ndir);
+    this.ndir.subVectors(tip, this.ndir).normalize(); // wrist -> fingertip = where the hand points
+    this.ray.set(tip, this.ndir);
+    const hit = this.ray.intersectObjects(scan.proxies, false)[0];
+    if (!hit?.face) { console.log(`[throw] pinch: no wall hit, dir=${this.ndir.x.toFixed(2)},${this.ndir.y.toFixed(2)},${this.ndir.z.toFixed(2)} proxies=${scan.proxies.length}`); return; }
+    const n = hit.face.normal; // boxes are world-axis-aligned, so the local normal is the world normal
+    TARGET.copy(hit.point).addScaledVector(n, 0.01);
+    this.ring.position.copy(TARGET);
+    this.ring.lookAt(TARGET.x + n.x, TARGET.y + n.y, TARGET.z + n.z);
+    console.log(`[throw] target pinned at ${TARGET.x.toFixed(2)},${TARGET.y.toFixed(2)},${TARGET.z.toFixed(2)}`);
   }
 
   private grab() {
