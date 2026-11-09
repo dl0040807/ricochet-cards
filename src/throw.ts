@@ -2,7 +2,6 @@ import {
   BoxGeometry,
   Mesh,
   MeshStandardMaterial,
-  CanvasTexture,
   TorusGeometry,
   Raycaster,
   Entity,
@@ -20,6 +19,7 @@ import { scan } from './colliders.js';
 import { game, record, reset } from './game.js';
 import { sfx } from './audio.js';
 import { Hud } from './hud.js';
+import { CARD_H, CARD_T, CARD_W, makeCard, makeDeck } from './card.js';
 
 // Tuning knobs (PRD: tuned on the headset)
 export const THROW_ASSIST = 2.0; // room-mode release-speed multiplier
@@ -34,11 +34,8 @@ const LOST_GRACE = 0.4; // s of lost tracking before the card is put back
 const SLIP_GRACE = 0.5; // s of open fingers without a snap before the card is put back
 const AIM_ASSIST = 0; // 0..1 blend of throw direction toward where the head faces
 
-const CARD_W = 0.06, CARD_H = 0.09, CARD_T = 0.006;
-const cardGeo = new BoxGeometry(CARD_W, CARD_H, CARD_T);
 
 // PRD rank ladder: bounces -> label / points
-const LABELS = ['2', '5', '8', '10', 'J', 'Q', 'K', 'A'];
 const POINTS = [2, 5, 8, 10, 11, 12, 13, 20];
 const TARGET = new Vector3(0, 1.4, -2.9); // default until the player pinches a wall
 const TARGET_R = 0.15;
@@ -55,27 +52,6 @@ const WARMUP = 3; // frames before the physics velocity is trustworthy (first re
 const FLIGHT_MAX = 6; // s
 const GRAVITY = -9.81;
 const TABLE_AFTER = 3; // s without a room scan -> table mode
-
-function makeCard(): { mesh: Mesh; paint: (rank: number) => void } {
-  const c = document.createElement('canvas');
-  c.width = 128; c.height = 192;
-  const ctx = c.getContext('2d')!;
-  const tex = new CanvasTexture(c);
-  const mat = new MeshStandardMaterial({ map: tex });
-  const paint = (rank: number) => {
-    const ace = rank >= 7;
-    ctx.fillStyle = ace ? '#2a0a4a' : '#ffffff';
-    ctx.fillRect(0, 0, 128, 192);
-    ctx.fillStyle = ace ? '#d58bff' : '#111111';
-    ctx.font = 'bold 84px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(LABELS[Math.min(rank, 7)], 64, 120);
-    tex.needsUpdate = true;
-    mat.emissive.set(ace ? 0x9b30ff : 0x000000); // Neon Ace
-  };
-  paint(0);
-  return { mesh: new Mesh(cardGeo, mat), paint };
-}
 
 type Flight = {
   e: Entity; mesh: Mesh; paint: (r: number) => void;
@@ -115,7 +91,7 @@ export class ThrowSystem extends createSystem({}) {
   init() {
     const w = this.world as World;
     // visible markers: the deck you grab from, and the target ring on the far wall
-    const deck = new Mesh(cardGeo, new MeshStandardMaterial({ color: 0xffd34d, emissive: 0x553d00 }));
+    const deck = makeDeck();
     deck.position.copy(DECK_POS);
     deck.rotation.x = -0.4;
     w.createTransformEntity(deck);

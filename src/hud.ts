@@ -63,7 +63,7 @@ export class Hud {
       const hint = !game.targetPlaced
         ? 'Pinch a wall to place the target'
         : game.throws === 0
-          ? 'Grab the gold card with two fingers, flick to throw. Every wall bounce ranks it up'
+          ? 'Grab the blue deck card with two fingers, flick to throw. Every wall bounce ranks it up'
           : '';
       g.fillText(hint, W / 2, 290, W - 40);
     }
