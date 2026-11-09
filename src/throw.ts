@@ -42,10 +42,15 @@ const LABELS = ['2', '5', '8', '10', 'J', 'Q', 'K', 'A'];
 const POINTS = [2, 5, 8, 10, 11, 12, 13, 20];
 const TARGET = new Vector3(0, 1.4, -2.9); // default until the player pinches a wall
 const TARGET_R = 0.15;
+const TARGET_EVERY = 3; // throws between target moves
+const AIM_LINE_THROWS = 3; // aim line is shown for the first N throws only
 const PINCH_ON = 0.02; // thumb-index gap that counts as a pinch
 const BULL_R = 0.04;
 const BOUNCE_DV = 0.8; // m/s velocity change not explained by gravity = a bounce
 const FLOOR_Y = 0.09; // card center this low = lying on the floor (long edge is 9 cm)
+const REST_SPEED = 0.4; // m/s
+const REST_TIME = 0.4; // s below REST_SPEED = card stopped
+const BOUNCE_GAP = 0.1; // s between countable bounces
 const WARMUP = 3; // frames before the physics velocity is trustworthy (first reads are 0)
 const FLIGHT_MAX = 6; // s
 const GRAVITY = -9.81;
@@ -74,7 +79,7 @@ function makeCard(): { mesh: Mesh; paint: (rank: number) => void } {
 
 type Flight = {
   e: Entity; mesh: Mesh; paint: (r: number) => void;
-  prev: Vector3; age: number; started: number; bounces: number; done: boolean; removeAt: number;
+  prev: Vector3; age: number; rest: number; lastBounce: number; started: number; bounces: number; done: boolean; removeAt: number;
 };
 
 type Sample = { p: Vector3; t: number };
@@ -92,6 +97,9 @@ export class ThrowSystem extends createSystem({}) {
   private openAt = -1;
   private fwd = new Vector3();
   private ring!: Mesh;
+  private aim!: Mesh;
+  private zAxis = new Vector3(0, 0, 1);
+  private handDir = new Vector3(0, 0, -1);
   private pinching = false;
   private ray = new Raycaster();
   private ndir = new Vector3();
@@ -116,6 +124,9 @@ export class ThrowSystem extends createSystem({}) {
     w.createTransformEntity(ring);
     this.ring = ring;
     w.scene.add(this.hud.mesh);
+    this.aim = new Mesh(new BoxGeometry(0.004, 0.004, 1), new MeshStandardMaterial({ color: 0x9fe8ff, emissive: 0x4090a0, transparent: true, opacity: 0.45 }));
+    this.aim.visible = false;
+    w.scene.add(this.aim);
     for (let i = 0; i < 2; i++) {
       const hand = w.renderer.xr.getHand(i) as unknown as Object3D & {
         joints: Record<string, Object3D>;
@@ -201,11 +212,22 @@ export class ThrowSystem extends createSystem({}) {
       wrist.getWorldPosition(dir);
       dir.subVectors(w, dir).normalize();
       this.held.quaternion.copy(this.q.setFromUnitVectors(this.up, dir));
+      this.handDir.copy(dir);
     }
     // sample the wrist: it doesn't jitter when the fingers open (fall back to the fingertip midpoint)
     const ref = wrist ? wrist.getWorldPosition(this.tmp.dir) : w;
     this.samples.push({ p: ref.clone(), t: time }); // ponytail: allocs 1 Vector3/frame, pool if GC hitches
     if (this.samples.length > SAMPLES) this.samples.shift();
+
+    // faint aim line, first throws only: along the hand's current motion (or where the fingers point)
+    this.aim.visible = game.throws < AIM_LINE_THROWS;
+    if (this.aim.visible) {
+      const vel = this.velocity();
+      const d = vel.length() > 0.3 ? vel.clone().normalize() : this.handDir; // ponytail: clone per frame, only while the line is on
+      this.aim.scale.z = 1.5;
+      this.aim.position.copy(w).addScaledVector(d, 0.75);
+      this.aim.quaternion.setFromUnitVectors(this.zAxis, d);
+    }
 
     if (gap > GRIP_OFF) {
       if (this.openAt < 0) this.openAt = time;
@@ -224,13 +246,38 @@ export class ThrowSystem extends createSystem({}) {
     this.ray.set(tip, this.ndir);
     const hit = this.ray.intersectObjects(scan.proxies, false)[0];
     if (!hit?.face) { console.log(`[throw] pinch: no wall hit, dir=${this.ndir.x.toFixed(2)},${this.ndir.y.toFixed(2)},${this.ndir.z.toFixed(2)} proxies=${scan.proxies.length}`); return; }
-    const n = hit.face.normal; // boxes are world-axis-aligned, so the local normal is the world normal
-    TARGET.copy(hit.point).addScaledVector(n, 0.01);
-    this.ring.position.copy(TARGET);
-    this.ring.lookAt(TARGET.x + n.x, TARGET.y + n.y, TARGET.z + n.z);
+    this.setTarget(hit.point, hit.face.normal); // boxes are world-axis-aligned, so the local normal is the world normal
     game.targetPlaced = true;
     game.dirty = true;
-    console.log(`[throw] target pinned at ${TARGET.x.toFixed(2)},${TARGET.y.toFixed(2)},${TARGET.z.toFixed(2)}`);
+  }
+
+  private setTarget(point: Vector3, n: Vector3) {
+    TARGET.copy(point).addScaledVector(n, 0.01);
+    this.ring.position.copy(TARGET);
+    this.ring.lookAt(TARGET.x + n.x, TARGET.y + n.y, TARGET.z + n.z);
+    console.log(`[throw] target at ${TARGET.x.toFixed(2)},${TARGET.y.toFixed(2)},${TARGET.z.toFixed(2)}`);
+  }
+
+  /** Every 3 throws the ring jumps to another wall spot in front of the player (random rays from the head). */
+  private moveTarget() {
+    const w = this.world as World;
+    const head = w.camera.getWorldPosition(this.tp);
+    w.camera.getWorldDirection(this.fwd);
+    const yaw0 = Math.atan2(this.fwd.x, this.fwd.z);
+    for (let i = 0; i < 30; i++) {
+      const yaw = yaw0 + (Math.random() - 0.5) * 2.4; // +-70 deg around where you face
+      const pitch = (Math.random() - 0.3) * 0.5;
+      this.ndir.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+      this.ray.set(head, this.ndir);
+      const hit = this.ray.intersectObjects(scan.proxies, false)[0];
+      if (!hit?.face || hit.distance < 1.5 || hit.distance > 5) continue;
+      if (Math.abs(hit.face.normal.y) > 0.3) continue; // walls and upright faces only
+      if (hit.point.y < 0.5 || hit.point.y > 2.2) continue;
+      this.setTarget(hit.point, hit.face.normal);
+      game.last = 'Target moved';
+      game.dirty = true;
+      return;
+    }
   }
 
   private grab() {
@@ -243,6 +290,7 @@ export class ThrowSystem extends createSystem({}) {
   }
 
   private drop() {
+    this.aim.visible = false;
     if (!this.held) return;
     this.held.removeFromParent();
     this.held = undefined;
@@ -272,6 +320,7 @@ export class ThrowSystem extends createSystem({}) {
     console.log(`[throw] release speed=${v.length().toFixed(2)} m/s scanColliders=${scan.colliders} arena=${this.arena}`);
 
     this.held = undefined;
+    this.aim.visible = false;
     this.openAt = this.lostAt = -1;
     const w = this.world as World;
     card.removeFromParent(); // createTransformEntity re-parents it into the scene
@@ -284,7 +333,7 @@ export class ThrowSystem extends createSystem({}) {
       })
       .addComponent(PhysicsBody, { state: PhysicsState.Dynamic })
       .addComponent(PhysicsManipulation, { linearVelocity: [v.x, v.y, v.z] });
-    this.flights.push({ e, mesh: card, paint: this.heldPaint!, prev: v.clone(), age: 0, started: -1, bounces: 0, done: false, removeAt: 0 });
+    this.flights.push({ e, mesh: card, paint: this.heldPaint!, prev: v.clone(), age: 0, rest: 0, lastBounce: -1, started: -1, bounces: 0, done: false, removeAt: 0 });
   }
 
   private updateFlights(dt: number, time: number) {
@@ -310,10 +359,14 @@ export class ThrowSystem extends createSystem({}) {
 
       // bounce = velocity change beyond what gravity explains
       if (++f.age <= WARMUP) { f.prev.copy(this.v); continue; }
+      // card lying still on furniture: the throw is over (otherwise jitter would keep adding bounces)
+      f.rest = this.v.length() < REST_SPEED ? f.rest + dt : 0;
+      if (f.rest > REST_TIME) { this.finish(f, time, 0); continue; }
       if (f.prev.lengthSq() > 0.09) {
         const dvx = this.v.x - f.prev.x, dvz = this.v.z - f.prev.z;
         const dvy = this.v.y - f.prev.y - GRAVITY * dt;
-        if (Math.hypot(dvx, dvy, dvz) > BOUNCE_DV && p.y > FLOOR_Y + 0.06) { // a floor hit ends the throw, it isn't a rank-up
+        if (Math.hypot(dvx, dvy, dvz) > BOUNCE_DV && p.y > FLOOR_Y + 0.06 && time - f.lastBounce > BOUNCE_GAP) {
+          f.lastBounce = time; // a floor hit ends the throw, it isn't a rank-up
           f.bounces++;
           console.log(`[throw] bounce#${f.bounces} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)} v=${this.v.x.toFixed(1)},${this.v.y.toFixed(1)},${this.v.z.toFixed(1)} dv=${Math.hypot(dvx, dvy, dvz).toFixed(2)}`);
           f.paint(Math.min(f.bounces, 7));
@@ -330,6 +383,7 @@ export class ThrowSystem extends createSystem({}) {
     record(points, f.bounces);
     if (points > 0) sfx.score(points); else sfx.miss();
     if (game.over) sfx.over();
+    else if (game.throws % TARGET_EVERY === 0) this.moveTarget();
     console.log(`[throw] bounces=${f.bounces} points=${points} score=${game.score} throws=${game.throws}`);
   }
 }
