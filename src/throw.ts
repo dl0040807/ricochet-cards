@@ -10,6 +10,8 @@ import {
   PhysicsManipulation,
   PhysicsShape,
   PhysicsState,
+  Box3,
+  Matrix4,
   Quaternion,
   Vector3,
   createSystem,
@@ -43,19 +45,19 @@ const TARGET_EVERY = 3; // throws between target moves
 const AIM_LINE_THROWS = 3; // aim line is shown for the first N throws only
 const PINCH_ON = 0.02; // thumb-index gap that counts as a pinch
 const BULL_R = 0.04;
-const BOUNCE_DV = 0.8; // m/s velocity change not explained by gravity = a bounce
 const FLOOR_Y = 0.09; // card center this low = lying on the floor (long edge is 9 cm)
 const REST_SPEED = 0.4; // m/s
 const REST_TIME = 0.4; // s below REST_SPEED = card stopped
+const CONTACT = 0.06; // card center this close to a wall/furniture box = touching (card half-length is 4.5 cm)
+const RELEASE_MARGIN = 0.05; // must move this far off a surface before it can count again
 const BOUNCE_GAP = 0.1; // s between countable bounces
 const WARMUP = 3; // frames before the physics velocity is trustworthy (first reads are 0)
 const FLIGHT_MAX = 6; // s
-const GRAVITY = -9.81;
 const TABLE_AFTER = 3; // s without a room scan -> table mode
 
 type Flight = {
   e: Entity; mesh: Mesh; paint: (r: number) => void;
-  prev: Vector3; age: number; rest: number; lastBounce: number; started: number; bounces: number; done: boolean; removeAt: number;
+  inside: Set<Object3D>; age: number; rest: number; lastBounce: number; started: number; bounces: number; done: boolean; removeAt: number;
 };
 
 type Sample = { p: Vector3; t: number };
@@ -76,6 +78,10 @@ export class ThrowSystem extends createSystem({}) {
   private aim!: Mesh;
   private zAxis = new Vector3(0, 0, 1);
   private handDir = new Vector3(0, 0, -1);
+  private zf = new Vector3();
+  private xf = new Vector3();
+  private basis = new Matrix4();
+  private boxes = new Map<Object3D, Box3>();
   private pinching = false;
   private ray = new Raycaster();
   private ndir = new Vector3();
@@ -187,8 +193,15 @@ export class ThrowSystem extends createSystem({}) {
     if (wrist) {
       wrist.getWorldPosition(dir);
       dir.subVectors(w, dir).normalize();
-      this.held.quaternion.copy(this.q.setFromUnitVectors(this.up, dir));
       this.handDir.copy(dir);
+      // long edge (+Y) along the fingers, front face (+Z) turned toward your eyes so you see the rank
+      const head = (this.world as World).camera.getWorldPosition(this.tp);
+      this.zf.subVectors(head, w);
+      this.zf.addScaledVector(dir, -this.zf.dot(dir)); // keep only the part perpendicular to the fingers
+      if (this.zf.lengthSq() < 1e-6) this.zf.set(0, 0, 1);
+      this.zf.normalize();
+      this.xf.crossVectors(dir, this.zf);
+      this.held.quaternion.setFromRotationMatrix(this.basis.makeBasis(this.xf, dir, this.zf));
     }
     // sample the wrist: it doesn't jitter when the fingers open (fall back to the fingertip midpoint)
     const ref = wrist ? wrist.getWorldPosition(this.tmp.dir) : w;
@@ -309,7 +322,7 @@ export class ThrowSystem extends createSystem({}) {
       })
       .addComponent(PhysicsBody, { state: PhysicsState.Dynamic })
       .addComponent(PhysicsManipulation, { linearVelocity: [v.x, v.y, v.z] });
-    this.flights.push({ e, mesh: card, paint: this.heldPaint!, prev: v.clone(), age: 0, rest: 0, lastBounce: -1, started: -1, bounces: 0, done: false, removeAt: 0 });
+    this.flights.push({ e, mesh: card, paint: this.heldPaint!, inside: new Set(), age: 0, rest: 0, lastBounce: -1, started: -1, bounces: 0, done: false, removeAt: 0 });
   }
 
   private updateFlights(dt: number, time: number) {
@@ -333,23 +346,26 @@ export class ThrowSystem extends createSystem({}) {
       }
       if (time - f.started > FLIGHT_MAX) { this.finish(f, time, 0); continue; }
 
-      // bounce = velocity change beyond what gravity explains
-      if (++f.age <= WARMUP) { f.prev.copy(this.v); continue; }
+      if (++f.age <= WARMUP) continue; // physics velocity reads 0 for the first frames
       // card lying still on furniture: the throw is over (otherwise jitter would keep adding bounces)
       f.rest = this.v.length() < REST_SPEED ? f.rest + dt : 0;
       if (f.rest > REST_TIME) { this.finish(f, time, 0); continue; }
-      if (f.prev.lengthSq() > 0.09) {
-        const dvx = this.v.x - f.prev.x, dvz = this.v.z - f.prev.z;
-        const dvy = this.v.y - f.prev.y - GRAVITY * dt;
-        if (Math.hypot(dvx, dvy, dvz) > BOUNCE_DV && p.y > FLOOR_Y + 0.06 && time - f.lastBounce > BOUNCE_GAP) {
-          f.lastBounce = time; // a floor hit ends the throw, it isn't a rank-up
-          f.bounces++;
-          console.log(`[throw] bounce#${f.bounces} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)} v=${this.v.x.toFixed(1)},${this.v.y.toFixed(1)},${this.v.z.toFixed(1)} dv=${Math.hypot(dvx, dvy, dvz).toFixed(2)}`);
-          f.paint(Math.min(f.bounces, 7));
-          if (f.bounces === 7) sfx.ace(); else sfx.bounce(Math.min(f.bounces, 7));
-        }
+      // rank up when the card touches a wall, the ceiling or hard furniture (the floor ends the throw instead)
+      for (const o of scan.proxies) {
+        let box = this.boxes.get(o);
+        if (!box) this.boxes.set(o, (box = new Box3().setFromObject(o)));
+        if (box.max.y < 0.2) continue; // floor slab
+        const d = box.distanceToPoint(p);
+        if (d > CONTACT + RELEASE_MARGIN) { f.inside.delete(o); continue; } // clearly left the surface
+        if (d >= CONTACT || f.inside.has(o)) continue; // hysteresis: jitter on a surface is one contact
+        f.inside.add(o);
+        if (time - f.lastBounce < BOUNCE_GAP) continue;
+        f.lastBounce = time;
+        f.bounces++;
+        console.log(`[throw] touch#${f.bounces} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`);
+        f.paint(Math.min(f.bounces, 7));
+        if (f.bounces === 7) sfx.ace(); else sfx.bounce(Math.min(f.bounces, 7));
       }
-      f.prev.copy(this.v);
     }
   }
 
