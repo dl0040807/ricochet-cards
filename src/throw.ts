@@ -21,6 +21,7 @@ import { scan } from './colliders.js';
 import { game, record, reset } from './game.js';
 import { sfx } from './audio.js';
 import { Hud } from './hud.js';
+import { saveRun, sendThrow } from './online.js';
 import { CARD_H, CARD_T, CARD_W, makeCard, makeDeck } from './card.js';
 
 // Tuning knobs (PRD: tuned on the headset)
@@ -373,6 +374,8 @@ export class ThrowSystem extends createSystem({}) {
     f.done = true;
     f.removeAt = time + 3;
     record(points, f.bounces);
+    sendThrow(game.throws, points, f.bounces, game.score);
+    if (game.over) void saveRun(game.online ? 'online' : 'solo', game.score, game.runPoints);
     if (points > 0) sfx.score(points); else sfx.miss();
     if (game.over) sfx.over();
     else if (game.throws % TARGET_EVERY === 0) this.moveTarget();

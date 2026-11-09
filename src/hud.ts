@@ -1,5 +1,6 @@
 import { CanvasTexture, Mesh, MeshBasicMaterial, PlaneGeometry, Vector3, type World } from '@iwsdk/core';
-import { MAX_THROWS, game, ghostScoreNow, ghostTotal } from './game.js';
+import { game, ghostScoreNow, ghostTotal } from './game.js';
+import { online } from './online.js';
 
 const W = 640, H = 360;
 
@@ -46,16 +47,22 @@ export class Hud {
       g.font = '30px sans-serif';
       g.fillStyle = '#d58bff';
       g.fillText(`Neon Aces: ${game.aces}     Best: ${game.best}`, W / 2, 245);
-      const gt = game.ghostBeaten ? game.score : ghostTotal();
-      g.fillStyle = game.ghostBeaten ? '#7dff9b' : '#ff9b9b';
       g.font = '28px sans-serif';
-      g.fillText(game.ghostBeaten ? 'You beat the ghost!' : `Ghost wins ${gt} - ${game.score}`, W / 2, 280);
+      if (game.online) {
+        const done = online.oppThrows >= game.max;
+        g.fillStyle = !done ? '#ffd34d' : game.score > online.oppScore ? '#7dff9b' : game.score < online.oppScore ? '#ff9b9b' : '#ffffff';
+        g.fillText(!done ? `Waiting for opponent... (${online.oppScore})` : game.score > online.oppScore ? `You win ${game.score} - ${online.oppScore}!` : game.score < online.oppScore ? `You lose ${game.score} - ${online.oppScore}` : `Draw ${game.score} - ${online.oppScore}`, W / 2, 280);
+      } else {
+        const gt = game.ghostBeaten ? game.score : ghostTotal();
+        g.fillStyle = game.ghostBeaten ? '#7dff9b' : '#ff9b9b';
+        g.fillText(game.ghostBeaten ? 'You beat the ghost!' : `Ghost wins ${gt} - ${game.score}`, W / 2, 280);
+      }
       g.fillStyle = '#9fe8ff';
       g.fillText('Pinch thumb + index to play again', W / 2, 330);
     } else {
       g.font = '28px sans-serif';
       g.fillStyle = '#9fe8ff';
-      g.fillText(`Throw ${Math.min(game.throws + 1, MAX_THROWS)} / ${MAX_THROWS}      Best ${game.best}`, W / 2, 50);
+      g.fillText(`Throw ${Math.min(game.throws + 1, game.max)} / ${game.max}      Best ${game.best}`, W / 2, 50);
       g.font = 'bold 100px sans-serif';
       g.fillStyle = '#fff';
       g.fillText(String(game.score), W / 2, 160);
@@ -63,11 +70,16 @@ export class Hud {
       g.fillStyle = '#ffd34d';
       g.fillText(game.last, W / 2, 205);
       g.font = '26px sans-serif';
-      g.fillStyle = game.score >= ghostScoreNow() ? '#7dff9b' : '#ff9b9b';
-      g.fillText(`${game.ghost.name}: ${ghostScoreNow()}`, W / 2, 245);
+      const vs = game.online ? online.oppScore : ghostScoreNow();
+      g.fillStyle = game.score >= vs ? '#7dff9b' : '#ff9b9b';
+      g.fillText(`${game.online ? 'Opponent' : game.ghost.name}: ${vs}`, W / 2, 245);
       g.font = '26px sans-serif';
       g.fillStyle = '#ffffffcc';
-      const hint = !game.targetPlaced
+      const hint = online.status === 'waiting'
+        ? (online.host ? `Room ${online.code} - friend opens ?room=${online.code}` : `Joining room ${online.code}...`)
+        : online.status === 'error'
+          ? 'Online connection failed - playing solo'
+          : !game.targetPlaced
         ? 'Pinch a wall to place the target'
         : game.throws === 0
           ? 'Grab the blue deck card with two fingers, flick to throw. Every wall bounce ranks it up'

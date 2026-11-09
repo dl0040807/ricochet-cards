@@ -1,5 +1,5 @@
 // Score-attack state (no physics, no rendering): 10 throws, best score kept on the device.
-export const MAX_THROWS = 10;
+export const MAX_THROWS = 10; // solo; online 1v1 uses 5 each (startOnline)
 const KEY = 'ricochet.best';
 
 const loadBest = () => {
@@ -24,6 +24,13 @@ const loadGhost = (): Ghost => {
 const sum = (a: number[], n = a.length) => a.slice(0, n).reduce((x, y) => x + y, 0);
 
 export const game = {
+  max: MAX_THROWS,
+  online: false,
+  startOnline(n: number) { // opponent joined: restart as a fresh n-throw match
+    game.max = n;
+    game.online = true;
+    reset();
+  },
   ghost: loadGhost(),
   runPoints: [] as number[],
   throws: 0,
@@ -43,7 +50,7 @@ export function record(points: number, bounces: number) {
   game.runPoints.push(points);
   if (points > 0 && bounces >= 7) game.aces++;
   game.last = points > 0 ? `+${points}  (${bounces} bounce${bounces === 1 ? '' : 's'})` : 'Miss';
-  if (game.throws >= MAX_THROWS) {
+  if (game.throws >= game.max) {
     game.over = true;
     if (game.score > ghostTotal()) { // your run beats the ghost: it becomes the new ghost
       game.ghostBeaten = true;
