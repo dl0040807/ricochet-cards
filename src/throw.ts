@@ -17,6 +17,9 @@ import {
   type World,
 } from '@iwsdk/core';
 import { scan } from './colliders.js';
+import { game, record, reset } from './game.js';
+import { sfx } from './audio.js';
+import { Hud } from './hud.js';
 
 // Tuning knobs (PRD: tuned on the headset)
 export const THROW_ASSIST = 2.0; // room-mode release-speed multiplier
@@ -76,6 +79,8 @@ type Flight = {
 
 type Sample = { p: Vector3; t: number };
 
+const immersiveNow = (w: World) => !String(w.visibilityState).toLowerCase().startsWith('non');
+
 export class ThrowSystem extends createSystem({}) {
   private hands: { joints: Record<string, Object3D>; handedness?: string }[] = [];
   private held?: Mesh;
@@ -92,8 +97,8 @@ export class ThrowSystem extends createSystem({}) {
   private ndir = new Vector3();
   private tp = new Vector3();
   private v = new Vector3();
-  score = 0;
-  best = 0;
+  private hud = new Hud();
+  private hudPlaced = false;
   private samples: Sample[] = [];
   private tmp = { a: new Vector3(), b: new Vector3(), w: new Vector3(), mid: new Vector3(), dir: new Vector3() };
   private q = new Quaternion();
@@ -110,6 +115,7 @@ export class ThrowSystem extends createSystem({}) {
     ring.position.copy(TARGET);
     w.createTransformEntity(ring);
     this.ring = ring;
+    w.scene.add(this.hud.mesh);
     for (let i = 0; i < 2; i++) {
       const hand = w.renderer.xr.getHand(i) as unknown as Object3D & {
         joints: Record<string, Object3D>;
@@ -145,6 +151,9 @@ export class ThrowSystem extends createSystem({}) {
 
   update(dt: number, time: number) {
     this.updateFlights(dt, time);
+    if (immersiveNow(this.world) && !this.hudPlaced) { this.hud.place(this.world as World); this.hudPlaced = true; }
+    if (!immersiveNow(this.world)) this.hudPlaced = false;
+    if (game.dirty) this.hud.draw();
     const immersive = !String(this.world.visibilityState).toLowerCase().startsWith('non');
     if (immersive && this.immersiveAt < 0) this.immersiveAt = time; // count from AR entry, not app start
     if (!immersive) this.immersiveAt = -1;
@@ -176,12 +185,12 @@ export class ThrowSystem extends createSystem({}) {
     if (thumb && !this.held) {
       thumb.getWorldPosition(this.tp);
       const pinch = this.tp.distanceTo(a) < PINCH_ON && w.distanceTo(DECK_POS) > DECK_RADIUS * 2;
-      if (pinch && !this.pinching) this.placeTarget(hand, a);
+      if (pinch && !this.pinching) { if (game.over) reset(); else this.placeTarget(hand, a); }
       this.pinching = pinch;
     }
 
     if (!this.held) {
-      if (gap < GRIP_ON && w.distanceTo(DECK_POS) < DECK_RADIUS) this.grab();
+      if (!game.over && gap < GRIP_ON && w.distanceTo(DECK_POS) < DECK_RADIUS) this.grab();
       return;
     }
 
@@ -219,6 +228,8 @@ export class ThrowSystem extends createSystem({}) {
     TARGET.copy(hit.point).addScaledVector(n, 0.01);
     this.ring.position.copy(TARGET);
     this.ring.lookAt(TARGET.x + n.x, TARGET.y + n.y, TARGET.z + n.z);
+    game.targetPlaced = true;
+    game.dirty = true;
     console.log(`[throw] target pinned at ${TARGET.x.toFixed(2)},${TARGET.y.toFixed(2)},${TARGET.z.toFixed(2)}`);
   }
 
@@ -228,6 +239,7 @@ export class ThrowSystem extends createSystem({}) {
     this.heldPaint = c.paint;
     (this.world as World).scene.add(this.held);
     this.samples.length = 0;
+    sfx.grab();
   }
 
   private drop() {
@@ -305,6 +317,7 @@ export class ThrowSystem extends createSystem({}) {
           f.bounces++;
           console.log(`[throw] bounce#${f.bounces} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)} v=${this.v.x.toFixed(1)},${this.v.y.toFixed(1)},${this.v.z.toFixed(1)} dv=${Math.hypot(dvx, dvy, dvz).toFixed(2)}`);
           f.paint(Math.min(f.bounces, 7));
+          if (f.bounces === 7) sfx.ace(); else sfx.bounce(Math.min(f.bounces, 7));
         }
       }
       f.prev.copy(this.v);
@@ -314,8 +327,9 @@ export class ThrowSystem extends createSystem({}) {
   private finish(f: Flight, time: number, points: number) {
     f.done = true;
     f.removeAt = time + 3;
-    this.score += points;
-    this.best = Math.max(this.best, this.score);
-    console.log(`[throw] bounces=${f.bounces} points=${points} score=${this.score}`);
+    record(points, f.bounces);
+    if (points > 0) sfx.score(points); else sfx.miss();
+    if (game.over) sfx.over();
+    console.log(`[throw] bounces=${f.bounces} points=${points} score=${game.score} throws=${game.throws}`);
   }
 }
