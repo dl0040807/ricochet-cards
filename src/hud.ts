@@ -1,5 +1,5 @@
 import { CanvasTexture, Mesh, MeshBasicMaterial, PlaneGeometry, Vector3, type World } from '@iwsdk/core';
-import { MAX_THROWS, game } from './game.js';
+import { MAX_THROWS, game, ghostScoreNow, ghostTotal } from './game.js';
 
 const W = 640, H = 360;
 
@@ -46,8 +46,12 @@ export class Hud {
       g.font = '30px sans-serif';
       g.fillStyle = '#d58bff';
       g.fillText(`Neon Aces: ${game.aces}     Best: ${game.best}`, W / 2, 245);
+      const gt = game.ghostBeaten ? game.score : ghostTotal();
+      g.fillStyle = game.ghostBeaten ? '#7dff9b' : '#ff9b9b';
+      g.font = '28px sans-serif';
+      g.fillText(game.ghostBeaten ? 'You beat the ghost!' : `Ghost wins ${gt} - ${game.score}`, W / 2, 280);
       g.fillStyle = '#9fe8ff';
-      g.fillText('Pinch thumb + index to play again', W / 2, 310);
+      g.fillText('Pinch thumb + index to play again', W / 2, 330);
     } else {
       g.font = '28px sans-serif';
       g.fillStyle = '#9fe8ff';
@@ -57,7 +61,10 @@ export class Hud {
       g.fillText(String(game.score), W / 2, 160);
       g.font = '32px sans-serif';
       g.fillStyle = '#ffd34d';
-      g.fillText(game.last, W / 2, 210);
+      g.fillText(game.last, W / 2, 205);
+      g.font = '26px sans-serif';
+      g.fillStyle = game.score >= ghostScoreNow() ? '#7dff9b' : '#ff9b9b';
+      g.fillText(`${game.ghost.name}: ${ghostScoreNow()}`, W / 2, 245);
       g.font = '26px sans-serif';
       g.fillStyle = '#ffffffcc';
       const hint = !game.targetPlaced
