@@ -38,7 +38,7 @@ const SLIP_GRACE = 0.5; // s of open fingers without a snap before the card is p
 const AIM_ASSIST = 0; // 0..1 blend of throw direction toward where the head faces
 const FINGER_AIM = 0.85; // 0..1 blend of throw direction toward where thumb/middle finger point (wrist -> fingertips)
 const CARD_GRAVITY = 0.35; // flick cards glide: less gravity than a rock
-const CARD_SPIN = 3; // rad/s of spin about the card's face normal per m/s of speed
+const CARD_SPIN = 7; // rad/s of spin about the card's face normal per m/s of speed
 
 
 // PRD rank ladder: bounces -> label / points
