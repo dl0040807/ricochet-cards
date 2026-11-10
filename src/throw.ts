@@ -34,7 +34,7 @@ const AIM_ASSIST = 0; // 0..1 blend of throw direction toward where the head fac
 const FINGER_AIM = 0.9; // 0..1 blend of throw direction toward where thumb/middle finger point (wrist -> fingertips)
 const MIN_FLY = 4.5; // m/s: any real flick flies at least this fast, so it always reaches the wall
 const BOUNCE_KEEP = 0.95; // speed kept per bounce
-const CARD_GRAVITY = 0.06; // flick cards glide: less gravity than a rock
+const CARD_GRAVITY = 0; // flick cards glide: less gravity than a rock
 const CARD_SPIN = 7; // rad/s of spin about the card's face normal per m/s of speed
 
 
@@ -350,7 +350,7 @@ export class ThrowSystem extends createSystem({}) {
       if (f.rest > REST_TIME) { this.finish(f, time, 0); continue; }
 
       f.vel.y -= 9.81 * CARD_GRAVITY * dt; // floaty glide
-      f.mesh.rotateZ(f.spin * dt); // spin about the face normal
+      f.mesh.rotateX(f.spin * dt); // tumble end over end around the card's horizontal (width) axis
       const dist = f.vel.length() * dt;
       this.ray.set(p, this.ndir.copy(f.vel).normalize());
       this.ray.far = dist + CONTACT;
