@@ -36,6 +36,9 @@ const MIN_THROW = 0.8; // m/s: slower fingers-open is a wind-up slip, not a thro
 const LOST_GRACE = 0.4; // s of lost tracking before the card is put back
 const SLIP_GRACE = 0.5; // s of open fingers without a snap before the card is put back
 const AIM_ASSIST = 0; // 0..1 blend of throw direction toward where the head faces
+const FINGER_AIM = 0.85; // 0..1 blend of throw direction toward where thumb/middle finger point (wrist -> fingertips)
+const CARD_GRAVITY = 0.35; // flick cards glide: less gravity than a rock
+const CARD_SPIN = 3; // rad/s of spin about the card's face normal per m/s of speed
 
 
 // PRD rank ladder: bounces -> label / points
@@ -213,7 +216,7 @@ export class ThrowSystem extends createSystem({}) {
     this.aim.visible = game.throws < AIM_LINE_THROWS;
     if (this.aim.visible) {
       const vel = this.velocity();
-      const d = vel.length() > 0.3 ? vel.clone().normalize() : this.handDir; // ponytail: clone per frame, only while the line is on
+      const d = vel.length() > 0.3 ? vel.clone().normalize().lerp(this.handDir, FINGER_AIM) : this.handDir; // ponytail: clone per frame, only while the line is on
       this.aim.scale.z = 1.5;
       this.aim.position.copy(w).addScaledVector(d, 0.75);
       this.aim.quaternion.setFromUnitVectors(this.zAxis, d);
@@ -304,7 +307,7 @@ export class ThrowSystem extends createSystem({}) {
     const v = this.velocity().clone();
     (this.world as World).camera.getWorldDirection(this.fwd);
     const speed = v.length();
-    if (speed > 0) v.normalize().lerp(this.fwd, AIM_ASSIST).setLength(speed); // steer toward where you face
+    if (speed > 0) v.normalize().lerp(this.handDir, FINGER_AIM).lerp(this.fwd, AIM_ASSIST).setLength(speed); // steer toward where the fingers point
     v.multiplyScalar(THROW_ASSIST);
     if (v.length() > MAX_SPEED) v.setLength(MAX_SPEED);
     console.log(`[throw] release speed=${v.length().toFixed(2)} m/s scanColliders=${scan.colliders} arena=${this.arena}`);
@@ -313,6 +316,8 @@ export class ThrowSystem extends createSystem({}) {
     this.aim.visible = false;
     this.openAt = this.lostAt = -1;
     const w = this.world as World;
+    const n = this.tmp.dir.set(0, 0, 1).applyQuaternion(card.quaternion); // face normal: spin like a flicked card
+    const spin = v.length() * CARD_SPIN;
     card.removeFromParent(); // createTransformEntity re-parents it into the scene
     const e = w.createTransformEntity(card)
       .addComponent(PhysicsShape, {
@@ -321,8 +326,8 @@ export class ThrowSystem extends createSystem({}) {
         restitution: 0.85, // ~15% speed lost per bounce (tuning value)
         friction: 0.2,
       })
-      .addComponent(PhysicsBody, { state: PhysicsState.Dynamic })
-      .addComponent(PhysicsManipulation, { linearVelocity: [v.x, v.y, v.z] });
+      .addComponent(PhysicsBody, { state: PhysicsState.Dynamic, gravityFactor: CARD_GRAVITY, linearDamping: 0.05, angularDamping: 0 })
+      .addComponent(PhysicsManipulation, { linearVelocity: [v.x, v.y, v.z], angularVelocity: [n.x * spin, n.y * spin, n.z * spin] });
     this.flights.push({ e, mesh: card, paint: this.heldPaint!, inside: new Set(), age: 0, rest: 0, lastBounce: -1, started: -1, bounces: 0, done: false, removeAt: 0 });
   }
 
