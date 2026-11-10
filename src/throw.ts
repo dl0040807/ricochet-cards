@@ -6,11 +6,6 @@ import {
   Raycaster,
   Entity,
   Object3D,
-  PhysicsBody,
-  PhysicsManipulation,
-  PhysicsShape,
-  PhysicsState,
-  Box3,
   Matrix4,
   Quaternion,
   Vector3,
@@ -37,6 +32,8 @@ const LOST_GRACE = 0.4; // s of lost tracking before the card is put back
 const SLIP_GRACE = 0.5; // s of open fingers without a snap before the card is put back
 const AIM_ASSIST = 0; // 0..1 blend of throw direction toward where the head faces
 const FINGER_AIM = 0.85; // 0..1 blend of throw direction toward where thumb/middle finger point (wrist -> fingertips)
+const MIN_FLY = 4.5; // m/s: any real flick flies at least this fast, so it always reaches the wall
+const BOUNCE_KEEP = 0.85; // speed kept per bounce
 const CARD_GRAVITY = 0.35; // flick cards glide: less gravity than a rock
 const CARD_SPIN = 7; // rad/s of spin about the card's face normal per m/s of speed
 
@@ -60,8 +57,8 @@ const FLIGHT_MAX = 6; // s
 const TABLE_AFTER = 3; // s without a room scan -> table mode
 
 type Flight = {
-  e: Entity; mesh: Mesh; paint: (r: number) => void;
-  inside: Set<Object3D>; age: number; rest: number; lastBounce: number; started: number; bounces: number; done: boolean; removeAt: number;
+  e: Entity; mesh: Mesh; paint: (r: number) => void; vel: Vector3; spin: number;
+  rest: number; lastBounce: number; started: number; bounces: number; done: boolean; removeAt: number;
 };
 
 type Sample = { p: Vector3; t: number };
@@ -85,7 +82,6 @@ export class ThrowSystem extends createSystem({}) {
   private zf = new Vector3();
   private xf = new Vector3();
   private basis = new Matrix4();
-  private boxes = new Map<Object3D, Box3>();
   private pinching = false;
   private ray = new Raycaster();
   private ndir = new Vector3();
@@ -133,9 +129,7 @@ export class ThrowSystem extends createSystem({}) {
       );
       m.position.set(...pos);
       scan.proxies.push(m);
-      w.createTransformEntity(m)
-        .addComponent(PhysicsShape, { shape: 'Box', dimensions: size, restitution: 0.85, friction: 0.3 })
-        .addComponent(PhysicsBody, { state: PhysicsState.Static });
+      w.createTransformEntity(m);
     };
     wall([6, 0.1, 6], [0, -0.05, -2]); // floor
     wall([6, 3, 0.1], [0, 1.5, -3]); // far wall
@@ -306,29 +300,18 @@ export class ThrowSystem extends createSystem({}) {
     const card = this.held!;
     const v = this.velocity().clone();
     (this.world as World).camera.getWorldDirection(this.fwd);
-    const speed = v.length();
-    if (speed > 0) v.normalize().lerp(this.handDir, FINGER_AIM).lerp(this.fwd, AIM_ASSIST).setLength(speed); // steer toward where the fingers point
-    v.multiplyScalar(THROW_ASSIST);
-    if (v.length() > MAX_SPEED) v.setLength(MAX_SPEED);
-    console.log(`[throw] release speed=${v.length().toFixed(2)} m/s scanColliders=${scan.colliders} arena=${this.arena}`);
+    // flight is scripted, not simulated: fingers set the direction, the flick sets the speed (never below MIN_FLY)
+    const speed = Math.min(Math.max(v.length() * THROW_ASSIST, MIN_FLY), MAX_SPEED);
+    v.normalize().lerp(this.handDir, FINGER_AIM).lerp(this.fwd, AIM_ASSIST).setLength(speed);
+    console.log(`[throw] release speed=${speed.toFixed(2)} m/s scanColliders=${scan.colliders} arena=${this.arena}`);
 
     this.held = undefined;
     this.aim.visible = false;
     this.openAt = this.lostAt = -1;
     const w = this.world as World;
-    const n = this.tmp.dir.set(0, 0, 1).applyQuaternion(card.quaternion); // face normal: spin like a flicked card
-    const spin = v.length() * CARD_SPIN;
     card.removeFromParent(); // createTransformEntity re-parents it into the scene
-    const e = w.createTransformEntity(card)
-      .addComponent(PhysicsShape, {
-        shape: 'Box',
-        dimensions: [CARD_W, CARD_H, CARD_T],
-        restitution: 0.85, // ~15% speed lost per bounce (tuning value)
-        friction: 0.2,
-      })
-      .addComponent(PhysicsBody, { state: PhysicsState.Dynamic, gravityFactor: CARD_GRAVITY, linearDamping: 0.05, angularDamping: 0 })
-      .addComponent(PhysicsManipulation, { linearVelocity: [v.x, v.y, v.z], angularVelocity: [n.x * spin, n.y * spin, n.z * spin] });
-    this.flights.push({ e, mesh: card, paint: this.heldPaint!, inside: new Set(), age: 0, rest: 0, lastBounce: -1, started: -1, bounces: 0, done: false, removeAt: 0 });
+    const e = w.createTransformEntity(card);
+    this.flights.push({ e, mesh: card, paint: this.heldPaint!, vel: v, spin: speed * CARD_SPIN, rest: 0, lastBounce: -1, started: -1, bounces: 0, done: false, removeAt: 0 });
   }
 
   private updateFlights(dt: number, time: number) {
@@ -339,39 +322,36 @@ export class ThrowSystem extends createSystem({}) {
         if (time > f.removeAt) { f.e.dispose(); this.flights.splice(i, 1); }
         continue;
       }
-      const vv = f.e.getVectorView(PhysicsBody, '_linearVelocity');
-      this.v.set(vv[0], vv[1], vv[2]);
       const p = f.mesh.position;
-
       if (p.y < FLOOR_Y) { this.finish(f, time, 0); continue; } // floor ends the throw, 0 points
       if (p.distanceTo(TARGET) < TARGET_R) {
         const bonus = p.distanceTo(TARGET) < BULL_R ? 5 : 0;
-        f.e.removeComponent(PhysicsBody); // card sticks where it hit
-        this.finish(f, time, POINTS[Math.min(f.bounces, 7)] + bonus);
+        this.finish(f, time, POINTS[Math.min(f.bounces, 7)] + bonus); // card sticks where it hit
         continue;
       }
       if (time - f.started > FLIGHT_MAX) { this.finish(f, time, 0); continue; }
 
-      if (++f.age <= WARMUP) continue; // physics velocity reads 0 for the first frames
-      // card lying still on furniture: the throw is over (otherwise jitter would keep adding bounces)
-      f.rest = this.v.length() < REST_SPEED ? f.rest + dt : 0;
+      f.rest = f.vel.length() < REST_SPEED ? f.rest + dt : 0;
       if (f.rest > REST_TIME) { this.finish(f, time, 0); continue; }
-      // rank up when the card touches a wall, the ceiling or hard furniture (the floor ends the throw instead)
-      for (const o of scan.proxies) {
-        let box = this.boxes.get(o);
-        if (!box) this.boxes.set(o, (box = new Box3().setFromObject(o)));
-        if (box.max.y < 0.2) continue; // floor slab
-        const d = box.distanceToPoint(p);
-        if (d > CONTACT + RELEASE_MARGIN) { f.inside.delete(o); continue; } // clearly left the surface
-        if (d >= CONTACT || f.inside.has(o)) continue; // hysteresis: jitter on a surface is one contact
-        f.inside.add(o);
-        if (time - f.lastBounce < BOUNCE_GAP) continue;
-        f.lastBounce = time;
-        f.bounces++;
-        console.log(`[throw] touch#${f.bounces} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`);
-        f.paint(Math.min(f.bounces, 7));
-        if (f.bounces === 7) sfx.ace(); else sfx.bounce(Math.min(f.bounces, 7));
-      }
+
+      f.vel.y -= 9.81 * CARD_GRAVITY * dt; // floaty glide
+      f.mesh.rotateZ(f.spin * dt); // spin about the face normal
+      const dist = f.vel.length() * dt;
+      this.ray.set(p, this.ndir.copy(f.vel).normalize());
+      this.ray.far = dist + CONTACT;
+      const hit = this.ray.intersectObjects(scan.proxies, false)[0];
+      if (!hit?.face) { p.addScaledVector(f.vel, dt); continue; }
+
+      const n = hit.face.normal; // boxes are world-axis-aligned: local normal = world normal
+      if (n.y > 0.9 && hit.point.y < 0.2) { this.finish(f, time, 0); continue; } // landed on the floor
+      f.vel.addScaledVector(n, -(1 + BOUNCE_KEEP) * Math.min(f.vel.dot(n), 0));
+      p.copy(hit.point).addScaledVector(n, CONTACT * 0.7);
+      if (time - f.lastBounce < BOUNCE_GAP) continue;
+      f.lastBounce = time;
+      f.bounces++;
+      console.log(`[throw] touch#${f.bounces} pos=${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`);
+      f.paint(Math.min(f.bounces, 7));
+      if (f.bounces === 7) sfx.ace(); else sfx.bounce(Math.min(f.bounces, 7));
     }
   }
 
