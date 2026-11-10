@@ -350,7 +350,7 @@ export class ThrowSystem extends createSystem({}) {
       if (f.rest > REST_TIME) { this.finish(f, time, 0); continue; }
 
       f.vel.y -= 9.81 * CARD_GRAVITY * dt; // floaty glide
-      f.mesh.rotateX(f.spin * dt); // tumble end over end around the card's horizontal (width) axis
+      f.mesh.rotateZ(f.spin * dt); // frisbee spin about the face normal
       const dist = f.vel.length() * dt;
       this.ray.set(p, this.ndir.copy(f.vel).normalize());
       this.ray.far = dist + CONTACT;
