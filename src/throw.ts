@@ -31,10 +31,10 @@ const MIN_THROW = 0.8; // m/s: slower fingers-open is a wind-up slip, not a thro
 const LOST_GRACE = 0.4; // s of lost tracking before the card is put back
 const SLIP_GRACE = 0.5; // s of open fingers without a snap before the card is put back
 const AIM_ASSIST = 0; // 0..1 blend of throw direction toward where the head faces
-const FINGER_AIM = 0.85; // 0..1 blend of throw direction toward where thumb/middle finger point (wrist -> fingertips)
+const FINGER_AIM = 0.9; // 0..1 blend of throw direction toward where thumb/middle finger point (wrist -> fingertips)
 const MIN_FLY = 4.5; // m/s: any real flick flies at least this fast, so it always reaches the wall
-const BOUNCE_KEEP = 0.85; // speed kept per bounce
-const CARD_GRAVITY = 0.35; // flick cards glide: less gravity than a rock
+const BOUNCE_KEEP = 0.95; // speed kept per bounce
+const CARD_GRAVITY = 0.06; // flick cards glide: less gravity than a rock
 const CARD_SPIN = 7; // rad/s of spin about the card's face normal per m/s of speed
 
 
