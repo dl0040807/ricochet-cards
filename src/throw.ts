@@ -80,6 +80,7 @@ export class ThrowSystem extends createSystem({}) {
   private zAxis = new Vector3(0, 0, 1);
   private handDir = new Vector3(0, 0, -1);
   private zf = new Vector3();
+  private zf2 = new Vector3();
   private xf = new Vector3();
   private basis = new Matrix4();
   private pinching = false;
@@ -192,10 +193,23 @@ export class ThrowSystem extends createSystem({}) {
       wrist.getWorldPosition(dir);
       dir.subVectors(w, dir).normalize();
       this.handDir.copy(dir);
-      // long edge (+Y) along the fingers, front face (+Z) turned toward your eyes so you see the rank
+      // card is clamped between index and middle: long edge (+Y) along the fingers, faces toward the two fingers
+      // (normal = index -> middle direction), so rolling your hand rolls the card
+      const ip = hand.joints['index-finger-phalanx-proximal'], mp = hand.joints['middle-finger-phalanx-proximal'];
       const head = (this.world as World).camera.getWorldPosition(this.tp);
-      this.zf.subVectors(head, w);
-      this.zf.addScaledVector(dir, -this.zf.dot(dir)); // keep only the part perpendicular to the fingers
+      if (ip && mp) {
+        mp.getWorldPosition(this.xf).sub(ip.getWorldPosition(this.zf2));
+        this.xf.addScaledVector(dir, -this.xf.dot(dir)); // perpendicular to the fingers
+        if (this.xf.lengthSq() > 1e-8) {
+          this.xf.normalize();
+          const ref = this.zf.lengthSq() > 0 ? this.zf : this.zf2.subVectors(head, w); // keep the same face up; first frame: face the eyes
+          if (this.xf.dot(ref) < 0) this.xf.negate();
+          this.zf.copy(this.xf);
+        }
+      } else {
+        this.zf.subVectors(head, w);
+        this.zf.addScaledVector(dir, -this.zf.dot(dir));
+      }
       if (this.zf.lengthSq() < 1e-6) this.zf.set(0, 0, 1);
       this.zf.normalize();
       this.xf.crossVectors(dir, this.zf);
@@ -273,6 +287,7 @@ export class ThrowSystem extends createSystem({}) {
     this.heldPaint = c.paint;
     (this.world as World).scene.add(this.held);
     this.samples.length = 0;
+    this.zf.set(0, 0, 0); // new card: pick which face points at you
     sfx.grab();
   }
 
