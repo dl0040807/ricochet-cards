@@ -1,5 +1,7 @@
 import { World } from '@iwsdk/core';
 import projectOptions from 'virtual:iwsdk-project';
+import { PetSystem } from './pet.js';
 
-// 다람쥐 키우기: game systems are registered here as they are built.
-World.create(document.getElementById('scene-container') as HTMLDivElement, projectOptions);
+World.create(document.getElementById('scene-container') as HTMLDivElement, projectOptions).then((world) => {
+  world.registerSystem(PetSystem);
+});
