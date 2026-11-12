@@ -99,14 +99,16 @@ export function makeSquirrel() {
     sphere(0.03, FUR, 0, 0.025, -0.022), sphere(0.037, FUR, 0, 0.08, -0.036), sphere(0.034, FUR, 0, 0.135, -0.022),
     sphere(0.026, FUR_DARK, 0, 0.165, 0.004), sphere(0.017, CREAM, 0, 0.158, 0.022));
   const neckSlot = group(0, 0.096, 0.004);
+  const backSlot = group(0, 0.1, -0.04);
 
-  root.add(back, body, belly, footL, footR, armL, armR, head, tail, neckSlot);
-  return { root, body, belly, head, cheekL, cheekR, armL, armR, tail, eyeOpen, eyeHappy, eyeOuch, mouth, hatSlot, faceSlot, neckSlot };
+  root.add(back, body, belly, footL, footR, armL, armR, head, tail, neckSlot, backSlot);
+  return { root, body, belly, head, cheekL, cheekR, armL, armR, tail, eyeOpen, eyeHappy, eyeOuch, mouth, hatSlot, faceSlot, neckSlot, backSlot };
 }
 
 // ---- skins: small props on the head / neck / face ----
-export type SkinSlot = 'hat' | 'neck' | 'face';
-export const SKINS: { id: string; name: string; slot: SkinSlot; make: () => Object3D }[] = [
+export type SkinSlot = 'hat' | 'neck' | 'face' | 'back' | 'fur';
+export type Rarity = 'common' | 'rare' | 'legend';
+export const SKINS: { id: string; name: string; slot: SkinSlot; rarity?: Rarity; make: () => Object3D }[] = [
   {
     id: 'strawHat', name: '밀짚모자', slot: 'hat', make: () => {
       const brim = new Mesh(new CylinderGeometry(0.066, 0.07, 0.004, 24), STRAW);
@@ -161,6 +163,52 @@ export const SKINS: { id: string; name: string; slot: SkinSlot; make: () => Obje
       return g;
     },
   },
+  {
+    id: 'wizardHat', name: '마법사 모자', slot: 'hat', rarity: 'rare', make: () => {
+      const m = lam(0x4b3a9e);
+      const cone = at(new Mesh(new ConeGeometry(0.036, 0.075, 18), m), 0, 0.035, 0);
+      cone.rotation.z = 0.15;
+      const g = group(0, -0.006, 0, new Mesh(new CylinderGeometry(0.058, 0.058, 0.004, 24), m), cone);
+      for (let i = 0; i < 3; i++) g.add(sphere(0.0045, GOLD, Math.cos(i * 2.1) * 0.022, 0.02 + i * 0.012, Math.sin(i * 2.1) * 0.022 + 0.01));
+      return g;
+    },
+  },
+  {
+    id: 'cape', name: '망토', slot: 'back', rarity: 'rare', make: () => {
+      const c = new Mesh(new CylinderGeometry(0.03, 0.06, 0.085, 20, 1, true, Math.PI * 0.6, Math.PI * 0.8), new MeshLambertMaterial({ color: 0xc0283c, side: DoubleSide }));
+      c.position.set(0, -0.035, 0.035);
+      return group(0, 0, 0, c, at(new Mesh(new TorusGeometry(0.03, 0.004, 6, 16), GOLD), 0, 0.006, 0.04).rotateX(Math.PI / 2));
+    },
+  },
+  {
+    id: 'sunglasses', name: '선글라스', slot: 'face', rarity: 'rare', make: () => {
+      const lens = (x: number) => at(new Mesh(new BoxGeometry(0.036, 0.022, 0.004), DARK), x, 0, 0);
+      return group(0, 0.002, 0.004, lens(-0.027), lens(0.027), new Mesh(new BoxGeometry(0.02, 0.004, 0.004), DARK));
+    },
+  },
+  {
+    id: 'headphones', name: '헤드폰', slot: 'hat', rarity: 'rare', make: () => {
+      const band = new Mesh(new TorusGeometry(0.052, 0.005, 6, 24, Math.PI), lam(0x2d2d36));
+      band.position.y = -0.038;
+      const cup = (x: number) => { const c = at(new Mesh(new CylinderGeometry(0.016, 0.016, 0.012, 16), lam(0xff5fa2)), x, -0.04, 0); c.rotation.z = Math.PI / 2; return c; };
+      return group(0, 0, 0, band, cup(-0.052), cup(0.052));
+    },
+  },
+  {
+    id: 'crown', name: '왕관', slot: 'hat', rarity: 'legend', make: () => {
+      const g = group(0, -0.004, 0, new Mesh(new CylinderGeometry(0.03, 0.03, 0.016, 20, 1, true), new MeshLambertMaterial({ color: 0xf2c230, side: DoubleSide })));
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        g.add(at(new Mesh(new ConeGeometry(0.007, 0.018, 6), GOLD), Math.cos(a) * 0.028, 0.016, Math.sin(a) * 0.028));
+        g.add(sphere(0.004, lam(i % 2 ? 0x3fb6ff : 0xff4d6d), Math.cos(a + 0.6) * 0.031, 0, Math.sin(a + 0.6) * 0.031));
+      }
+      return g;
+    },
+  },
+  {
+    // worn = the whole coat turns gold; this fluff ball is its wardrobe icon
+    id: 'goldFur', name: '황금 털', slot: 'fur', rarity: 'legend', make: () => group(0, 0.012, 0, sphere(0.016, GOLD), sphere(0.01, GOLD, 0.012, 0.008, 0), sphere(0.01, GOLD, -0.011, 0.006, 0.004)),
+  },
 ];
 
 // ---- desk props (origin at the desk surface) ----
@@ -207,6 +255,20 @@ export function makeKey() {
 export function makePoop() {
   const m = lam(0x7a4b26);
   return group(0, 0, 0, sphere(0.014, m, 0, 0.008, 0, 1, 0.7, 1), sphere(0.01, m, 0, 0.018, 0, 1, 0.75, 1), sphere(0.006, m, 0, 0.026, 0));
+}
+
+/** Golden coat on/off (legendary skin). */
+export function setGoldFur(on: boolean) {
+  FUR.color.setHex(on ? 0xf2c230 : 0xd9843f);
+  FUR_DARK.color.setHex(on ? 0xd99a10 : 0xb5622a);
+}
+
+/** Dark see-through copy of a skin for the wardrobe slots you don't own yet. */
+const SHADOW = new MeshBasicMaterial({ color: 0x1a1a22, transparent: true, opacity: 0.55 });
+export function shadowOf(make: () => Object3D) {
+  const o = make();
+  o.traverse((c) => { if ((c as Mesh).isMesh) (c as Mesh).material = SHADOW; });
+  return o;
 }
 
 export const makeHeart = () => sphere(0.008, new MeshBasicMaterial({ color: 0xff6f91 }), 0, 0, 0, 1, 0.9, 0.5);

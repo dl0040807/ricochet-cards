@@ -16,7 +16,7 @@ import {
 import { sfx } from './audio.js';
 import { Hud } from './hud.js';
 import {
-  SKINS, makeAcorn, makeBasket, makeChest, makeHeart, makeKey, makePedestal, makePoop, makeSlot, makeSquirrel, makeTrash, makeTree,
+  SKINS, makeAcorn, makeBasket, makeChest, makeHeart, makeKey, makePedestal, makePoop, makeSlot, makeSquirrel, makeTrash, makeTree, setGoldFur, shadowOf,
   type Squirrel,
 } from './model.js';
 import { SKIN_IDS, addPoop, cleanPoop, drawSkin, feed, flick, load, pet, save, tick, type Save } from './state.js';
@@ -31,7 +31,8 @@ const TRASH = new Vector3(0.2, 0, 0.09);
 const CHEST = new Vector3(0.17, 0, -0.13);
 const KEY_REST = new Vector3(0.07, 0.014, 0.13);
 const POOP_SPOTS = [new Vector3(-0.1, 0, -0.04), new Vector3(0.09, 0, 0.01), new Vector3(-0.07, 0, 0.12)];
-const slotPos = (i: number, out: Vector3) => out.set(0.31 + (i % 2) * 0.068, 0.012, -0.2 + Math.floor(i / 2) * 0.068);
+// wardrobe: 12 slots, 3 columns x 4 rows, right of the chest
+const slotPos = (i: number, out: Vector3) => out.set(0.29 + (i % 3) * 0.056, 0.012, -0.26 + Math.floor(i / 3) * 0.056);
 
 // ---- tuning (PRD: adjust on the headset) ----
 const PINCH_ON = 0.02, PINCH_OFF = 0.045; // thumb-index gap
@@ -64,6 +65,7 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
   private hands: Hand[] = [];
   private poops: Object3D[] = [];
   private skinObj = new Map<string, Object3D>();
+  private shadows = new Map<string, Object3D>(); // silhouettes of skins not owned yet
   private key: Object3D | null = null;
   private keyOn: 'mouth' | 'palm' | 'desk' | 'held' | null = null;
   private keyHand: Hand | null = null;
@@ -89,6 +91,7 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
   private box = new Box3();
   private v = new Vector3();
   private v2 = new Vector3();
+  private v3 = new Vector3();
   private q = new Quaternion();
 
   init() {
@@ -124,8 +127,15 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     if (new URLSearchParams(location.search).has('reset')) localStorage.removeItem('daramji.save');
     const { s, away } = load();
     this.s = s;
+    for (const id of SKIN_IDS) {
+      if (s.owned.includes(id)) continue;
+      const def = SKINS.find((k) => k.id === id)!, sh = shadowOf(def.make);
+      slotPos(SKIN_IDS.indexOf(id), sh.position);
+      this.stage.add(sh);
+      this.shadows.set(id, sh);
+    }
     for (const id of s.owned) this.addSkin(id);
-    if (s.wearing) this.wear(s.wearing, true);
+    for (const id of [...s.worn]) this.wear(id, true);
     for (let i = 0; i < s.poops; i++) this.spawnPoop(i);
     if (s.hasKey) this.keyToDesk(KEY_REST);
     if (s.keyToday && !s.keyGot && !s.hasKey) this.keyAt = 60 + Math.random() * 120;
@@ -270,12 +280,12 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     let best = PICK_R, hit: Held | null = null;
     const tryItem = (obj: Object3D | null | undefined, kind: Kind, id?: string, r = 1) => {
       if (!obj) return;
-      const d = obj.position.distanceTo(h.pinch) / r;
+      const d = this.local(obj).distanceTo(h.pinch) / r;
       if (d < best) { best = d; hit = { kind, obj, id }; }
     };
     if (this.keyOn === 'desk') tryItem(this.key, 'key');
     for (const p of this.poops) tryItem(p, 'poop');
-    for (const [id, o] of this.skinObj) if (id !== this.s.wearing) tryItem(o, 'skin', id);
+    for (const [id, o] of this.skinObj) tryItem(o, 'skin', id);
     if (!hit && h.pinch.distanceTo(this.v2.copy(BASKET).setY(0.04)) < 0.085) {
       const a = makeAcorn();
       this.stage.add(a);
@@ -287,6 +297,10 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     if (h.held.kind === 'key') this.keyOn = 'held';
     if (h.held.kind === 'poop') this.poops.splice(this.poops.indexOf(h.held.obj), 1);
     if (h.held.id && h.held.id === this.popped) this.popped = null;
+    if (h.held.kind === 'skin' && h.held.obj.parent !== this.stage) { // taking a worn skin off
+      this.stage.attach(h.held.obj);
+      this.s.worn = this.s.worn.filter((id) => id !== h.held!.id);
+    }
     sfx.pick();
     console.log(`[pet] pick ${h.held.kind}${h.held.id ? ':' + h.held.id : ''}`);
   }
@@ -308,7 +322,8 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
       else this.keyToDesk(this.v2.set(p.x, KEY_REST.y, p.z));
     } else if (it.kind === 'skin') {
       if (!lost && visible && p.distanceTo(this.v2.copy(sqPos).setY(sqPos.y + 0.1)) < 0.14) this.wear(it.id!);
-      else slotPos(SKIN_IDS.indexOf(it.id!), p);
+      else if (it.id === 'goldFur') this.toSlot(it.id); // fur icon dropped elsewhere: just goes home
+      else { this.toSlot(it.id!); this.save(); }
     }
   }
 
@@ -433,32 +448,55 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     const def = SKINS.find((k) => k.id === id);
     if (!def) return new Group();
     const o = def.make();
+    this.shadows.get(id)?.removeFromParent();
+    this.shadows.delete(id);
     slotPos(SKIN_IDS.indexOf(id), o.position);
     this.stage.add(o);
     this.skinObj.set(id, o);
     return o;
   }
 
+  /** Wear a skin: one per body slot (hat, neck, face, back); gold fur toggles the coat colour. */
   private wear(id: string, quiet = false) {
     const def = SKINS.find((k) => k.id === id), o = this.skinObj.get(id);
     if (!def || !o) return;
-    const old = this.s.wearing && this.s.wearing !== id ? this.skinObj.get(this.s.wearing) : null;
-    if (old) { // the previous skin goes back to its wardrobe slot
-      this.stage.add(old);
-      old.rotation.set(0, 0, 0);
-      slotPos(SKIN_IDS.indexOf(this.s.wearing!), old.position);
+    if (def.slot === 'fur') {
+      const on = quiet || !this.s.worn.includes(id);
+      setGoldFur(on);
+      this.s.worn = this.s.worn.filter((w) => w !== id);
+      if (on) this.s.worn.push(id);
+      this.toSlot(id);
+    } else {
+      for (const w of this.s.worn) { // the skin already in that slot goes back to the wardrobe
+        if (w !== id && SKINS.find((k) => k.id === w)?.slot === def.slot) this.toSlot(w);
+      }
+      this.s.worn = this.s.worn.filter((w) => w !== id && SKINS.find((k) => k.id === w)?.slot !== def.slot);
+      this.s.worn.push(id);
+      const sq = this.sq;
+      ({ hat: sq.hatSlot, neck: sq.neckSlot, face: sq.faceSlot, back: sq.backSlot } as Record<string, Object3D>)[def.slot].add(o);
+      o.position.set(0, 0, 0);
+      o.rotation.set(0, 0, 0);
     }
-    (def.slot === 'hat' ? this.sq.hatSlot : def.slot === 'neck' ? this.sq.neckSlot : this.sq.faceSlot).add(o);
-    o.position.set(0, 0, 0);
-    this.s.wearing = id;
     if (id === this.popped) this.popped = null;
     if (quiet) return;
     this.setAct('spin', 1.6);
     sfx.wear();
     if (this.s.first && this.step === 7) { this.s.first = false; this.step = 8; this.say('다람쥐는 가끔 새 열쇠를 물고 와요. 내일 또 만나요!', 20); }
-    save(this.s);
-    console.log(`[pet] wear ${id}`);
+    this.save();
+    console.log(`[pet] wear ${id} worn=${this.s.worn.join(',')}`);
   }
+
+  /** Put a skin back in its wardrobe slot. */
+  private toSlot(id: string) {
+    const o = this.skinObj.get(id);
+    if (!o) return;
+    this.stage.add(o);
+    o.rotation.set(0, 0, 0);
+    slotPos(SKIN_IDS.indexOf(id), o.position);
+  }
+
+  private local(o: Object3D) { return o.parent === this.stage ? o.position : this.stage.worldToLocal(o.getWorldPosition(this.v3)); }
+  private save() { save(this.s); }
 
   // ---------- pacing ----------
   private next(step: number) { this.step = step; this.stepAt = this.st; }
