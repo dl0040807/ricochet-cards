@@ -2,6 +2,8 @@
 // Look: deliberately toy-like, not realistic: one chubby loaf, huge glossy eyes, tiny raised paws, big curled tail.
 import {
   BoxGeometry,
+  CanvasTexture,
+  PlaneGeometry,
   CircleGeometry,
   ConeGeometry,
   CylinderGeometry,
@@ -304,4 +306,39 @@ export function makeToyBox() {
   (wall.material as MeshLambertMaterial).transparent = true;
   (wall.material as MeshLambertMaterial).opacity = 0.9;
   return group(0, 0, 0, wall);
+}
+
+/** "Z z z" sign that floats over a sleeping squirrel. */
+export function makeZzz() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 64;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#ffffff';
+  g.strokeStyle = '#3b4a7a';
+  g.lineWidth = 6;
+  g.font = 'bold 40px sans-serif';
+  [['Z', 8, 56], ['z', 52, 40], ['z', 86, 24]].forEach(([t, x, y]) => { g.strokeText(t as string, x as number, y as number); g.fillText(t as string, x as number, y as number); });
+  return new Mesh(new PlaneGeometry(0.08, 0.04), new MeshBasicMaterial({ map: new CanvasTexture(c), transparent: true, depthWrite: false }));
+}
+
+/** Little wooden name sign on a stick; set() redraws the name. */
+export function makeNameTag() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 96;
+  const tex = new CanvasTexture(c);
+  const board = at(new Mesh(new PlaneGeometry(0.075, 0.028), new MeshBasicMaterial({ map: tex })), 0, 0.05, 0.002);
+  const back = at(new Mesh(new BoxGeometry(0.079, 0.032, 0.003), WOOD_DARK), 0, 0.05, 0);
+  const stick = at(new Mesh(new CylinderGeometry(0.002, 0.002, 0.05, 6), WOOD), 0, 0.025, -0.002);
+  const set = (name: string) => {
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#f3dfb8';
+    g.fillRect(0, 0, 256, 96);
+    g.fillStyle = '#5a3a1e';
+    g.font = 'bold 54px sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(name, 128, 52);
+    tex.needsUpdate = true;
+  };
+  return { root: group(0, 0, 0, stick, back, board), set };
 }

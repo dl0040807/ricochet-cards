@@ -5,7 +5,7 @@ export type Save = {
   last: number; // ms of the last save
   day: string; // day the daily values below belong to
   keyChance: number; keyToday: boolean; keyGot: boolean; hasKey: boolean;
-  petToday: number; playToday: number; streak: number; first: boolean;
+  petToday: number; playToday: number; streak: number; first: boolean; name: string;
 };
 
 const KEY = 'daramji.save';
@@ -24,7 +24,7 @@ export const dayOf = (ms: number) => { const d = new Date(ms); return `${d.getFu
 
 export const fresh = (now: number): Save => ({
   full: 70, clean: 100, mood: 60, poops: 0, owned: [], worn: [], last: now, day: dayOf(now),
-  keyChance: 0.5, keyToday: false, keyGot: false, hasKey: false, petToday: 0, playToday: 0, streak: 1, first: true,
+  keyChance: 0.5, keyToday: false, keyGot: false, hasKey: false, petToday: 0, playToday: 0, streak: 1, first: true, name: '도토리',
 });
 
 /** Time passed while away: hunger drops (100 -> 0 in ~6 h), poop piles up (max 3). Returns hours away. */
@@ -88,12 +88,23 @@ export function tick(s: Save, dt: number) { // dt seconds, while playing
   if (s.full < 20 || s.poops > 0) s.mood = clamp(s.mood - dt / 60); // neglect: -1 per minute
 }
 
-export function load(now = Date.now()): { s: Save; away: number } {
+export const NAMES = ['도토리', '밤톨이', '쪼꼬', '호두', '땅콩', '보리'];
+
+/** Judge helper (?nextday): pretend a whole day passed since the last visit, with a guaranteed key. */
+export function skipDay(s: Save) {
+  s.last -= 24 * HOUR;
+  s.day = dayOf(s.last);
+  s.first = false;
+  s.keyChance = 1;
+}
+
+export function load(now = Date.now(), nextDay = false): { s: Save; away: number } {
   let s: Save;
   try { s = { ...fresh(now), ...JSON.parse(localStorage.getItem(KEY) ?? 'null') }; } catch { s = fresh(now); }
   const old = (s as any).wearing; // v1 saves kept one worn skin
   if (typeof old === 'string' && !s.worn.includes(old)) s.worn.push(old);
   delete (s as any).wearing;
+  if (nextDay) skipDay(s);
   const away = applyAway(s, now);
   newDay(s, now);
   return { s, away };

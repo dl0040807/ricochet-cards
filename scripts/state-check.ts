@@ -1,6 +1,6 @@
 // Self-check for the pet rules in src/state.ts. Run: npm run check
 import assert from 'node:assert/strict';
-import { HOUR, SKIN_IDS, SKIN_RARITY, addPoop, applyAway, cleanPoop, dayOf, drawSkin, feed, flick, fresh, newDay, pet, play } from '../src/state.ts';
+import { HOUR, SKIN_IDS, SKIN_RARITY, addPoop, applyAway, cleanPoop, dayOf, drawSkin, feed, flick, fresh, newDay, pet, play, skipDay } from '../src/state.ts';
 
 const t0 = new Date(2026, 10, 12, 9).getTime();
 
@@ -79,4 +79,18 @@ console.log('state-check: rarity passed');
   p.full = 19;
   assert.equal(play(p), false);
   console.log('state-check: play passed');
+}
+
+// judge helper: skipping a day makes it hungry, piles poop and guarantees today's key
+{
+  const j = fresh(t0);
+  j.full = 100;
+  skipDay(j);
+  applyAway(j, t0);
+  newDay(j, t0);
+  assert.equal(j.full, 0);
+  assert.equal(j.poops, 3);
+  assert.equal(j.keyToday, true);
+  assert.equal(j.streak, 2);
+  console.log('state-check: nextday passed');
 }
