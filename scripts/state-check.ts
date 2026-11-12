@@ -1,6 +1,6 @@
 // Self-check for the pet rules in src/state.ts. Run: npm run check
 import assert from 'node:assert/strict';
-import { HOUR, SKIN_IDS, SKIN_RARITY, addPoop, applyAway, cleanPoop, dayOf, drawSkin, feed, flick, fresh, newDay, pet } from '../src/state.ts';
+import { HOUR, SKIN_IDS, SKIN_RARITY, addPoop, applyAway, cleanPoop, dayOf, drawSkin, feed, flick, fresh, newDay, pet, play } from '../src/state.ts';
 
 const t0 = new Date(2026, 10, 12, 9).getTime();
 
@@ -68,3 +68,15 @@ assert.equal(SKIN_RARITY[drawSkin(['acornHat'], () => 0.1)!], 'common');
 assert.equal(SKIN_RARITY[drawSkin(['acornHat'], () => 0.95)!], 'legend');
 assert.equal(SKIN_RARITY[drawSkin(SKIN_IDS.filter((id) => SKIN_RARITY[id] === 'common'), () => 0.1)!], 'rare'); // commons used up
 console.log('state-check: rarity passed');
+
+// play: +15 mood up to 45 a day, costs 5 fullness, refused when hungry
+{
+  const p = fresh(t0);
+  p.mood = 0; p.full = 50;
+  for (let i = 0; i < 5; i++) assert.equal(play(p), true);
+  assert.equal(p.mood, 45);
+  assert.equal(p.full, 25);
+  p.full = 19;
+  assert.equal(play(p), false);
+  console.log('state-check: play passed');
+}

@@ -5,7 +5,7 @@ export type Save = {
   last: number; // ms of the last save
   day: string; // day the daily values below belong to
   keyChance: number; keyToday: boolean; keyGot: boolean; hasKey: boolean;
-  petToday: number; streak: number; first: boolean;
+  petToday: number; playToday: number; streak: number; first: boolean;
 };
 
 const KEY = 'daramji.save';
@@ -18,12 +18,13 @@ export const SKIN_IDS = Object.keys(SKIN_RARITY);
 const TIER_W = { common: 0.6, rare: 0.3, legend: 0.1 };
 export const HOUR = 3600e3;
 export const PET_CAP = 30; // mood points from petting per day
+export const PLAY_CAP = 45; // mood points from playing per day (3 plays)
 const clamp = (v: number) => Math.max(0, Math.min(100, v));
 export const dayOf = (ms: number) => { const d = new Date(ms); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
 
 export const fresh = (now: number): Save => ({
   full: 70, clean: 100, mood: 60, poops: 0, owned: [], worn: [], last: now, day: dayOf(now),
-  keyChance: 0.5, keyToday: false, keyGot: false, hasKey: false, petToday: 0, streak: 1, first: true,
+  keyChance: 0.5, keyToday: false, keyGot: false, hasKey: false, petToday: 0, playToday: 0, streak: 1, first: true,
 });
 
 /** Time passed while away: hunger drops (100 -> 0 in ~6 h), poop piles up (max 3). Returns hours away. */
@@ -44,6 +45,7 @@ export function newDay(s: Save, now: number, rnd = Math.random) {
   s.streak = s.day === dayOf(now - 24 * HOUR) ? s.streak + 1 : 1;
   s.day = today;
   s.petToday = 0;
+  s.playToday = 0;
   s.keyGot = false;
   s.keyToday = !s.first && rnd() < s.keyChance;
   s.keyChance = s.keyToday ? 0.5 : Math.min(1, s.keyChance + 0.25);
@@ -70,6 +72,13 @@ export function feed(s: Save) { // returns false when already stuffed
 }
 export function pet(s: Save) {
   if (s.petToday < PET_CAP) { s.petToday += 5; s.mood = clamp(s.mood + 5); }
+}
+/** Playing: +15 mood (daily cap), -5 fullness. Refused when hungry (fullness < 20): food first. */
+export function play(s: Save) {
+  if (s.full < 20) return false;
+  if (s.playToday < PLAY_CAP) { s.playToday += 15; s.mood = clamp(s.mood + 15); }
+  s.full = clamp(s.full - 5);
+  return true;
 }
 export const flick = (s: Save) => { s.mood = clamp(s.mood - 10); };
 export function addPoop(s: Save) { if (s.poops < 3) s.poops++; s.clean = clamp(100 - s.poops * 25); }

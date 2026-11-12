@@ -279,3 +279,29 @@ export const makeSlot = () => {
   return d;
 };
 export const makePedestal = () => at(new Mesh(new CylinderGeometry(0.42, 0.42, 0.02, 40), lam(0xe9dcc6)), 0, -0.011, -0.06);
+
+// ---- play tools ----
+/** Foxtail grass: origin = where you pinch the stem, fluffy head 15 cm up (+Y). */
+export const FOXTAIL_LEN = 0.15;
+export function makeFoxtail() {
+  const stem = at(new Mesh(new CylinderGeometry(0.0018, 0.0022, FOXTAIL_LEN, 6), LEAF), 0, FOXTAIL_LEN / 2, 0);
+  const tip = group(0, FOXTAIL_LEN, 0, sphere(0.012, lam(0xd8c26a), 0, 0.012, 0, 0.8, 2.2, 0.8));
+  tip.rotation.z = 0.35; // nodding seed head
+  return group(0, 0, 0, stem, tip);
+}
+
+/** Acorn ball: a fat round acorn (r 2.2 cm) that rolls. */
+export const BALL_R = 0.022;
+export function makeBall() {
+  const cap = new Mesh(new SphereGeometry(BALL_R * 1.08, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2.4), WOOD_DARK);
+  cap.position.y = BALL_R * 0.25;
+  return group(0, 0, 0, sphere(BALL_R, lam(0xd99a55)), cap);
+}
+
+export function makeToyBox() {
+  const m = new MeshLambertMaterial({ color: 0x7fb3d9, side: DoubleSide });
+  const wall = at(new Mesh(new BoxGeometry(0.09, 0.035, 0.07, 1, 1, 1), m), 0, 0.0175, 0);
+  (wall.material as MeshLambertMaterial).transparent = true;
+  (wall.material as MeshLambertMaterial).opacity = 0.9;
+  return group(0, 0, 0, wall);
+}

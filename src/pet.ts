@@ -16,10 +16,10 @@ import {
 import { sfx } from './audio.js';
 import { Hud } from './hud.js';
 import {
-  SKINS, makeAcorn, makeBasket, makeChest, makeHeart, makeKey, makePedestal, makePoop, makeSlot, makeSquirrel, makeTrash, makeTree, setGoldFur, shadowOf,
+  SKINS, makeAcorn, makeBasket, makeChest, makeHeart, makeKey, makePedestal, makePoop, makeSlot, makeSquirrel, makeTrash, makeTree, setGoldFur, shadowOf, makeFoxtail, makeBall, makeToyBox, FOXTAIL_LEN, BALL_R,
   type Squirrel,
 } from './model.js';
-import { SKIN_IDS, addPoop, cleanPoop, drawSkin, feed, flick, load, pet, save, tick, type Save } from './state.js';
+import { SKIN_IDS, addPoop, cleanPoop, drawSkin, feed, flick, load, pet, play, save, tick, type Save } from './state.js';
 
 // ---- layout (stage-local metres) ----
 const HOME = new Vector3(0, 0, 0);
@@ -30,6 +30,10 @@ const BASKET = new Vector3(-0.2, 0, 0.06);
 const TRASH = new Vector3(0.2, 0, 0.09);
 const CHEST = new Vector3(0.17, 0, -0.13);
 const KEY_REST = new Vector3(0.07, 0.014, 0.13);
+const TOYS = new Vector3(-0.15, 0, -0.17);
+const FOX_HOME = new Vector3(-0.17, 0.03, -0.17);
+const BALL_HOME = new Vector3(-0.13, BALL_R + 0.004, -0.165);
+const EDGE = 0.4; // desk radius the ball can roll on before it falls off
 const POOP_SPOTS = [new Vector3(-0.1, 0, -0.04), new Vector3(0.09, 0, 0.01), new Vector3(-0.07, 0, 0.12)];
 // wardrobe: 12 slots, 3 columns x 4 rows, right of the chest
 const slotPos = (i: number, out: Vector3) => out.set(0.29 + (i % 3) * 0.056, 0.012, -0.26 + Math.floor(i / 3) * 0.056);
@@ -44,16 +48,18 @@ const PET_TIME = 0.5; // s of slow touching before it counts
 const FLICK_ARM = 0.02, FLICK_OPEN = 0.035, FLICK_SPEED = 0.8, FLICK_R = 0.11, FLICK_WINDOW = 0.4;
 const TWIST = 1.05; // rad (60 deg) of wrist roll to turn the key
 const WALK = 0.2; // m/s
+const CATCH_R = 0.075; // foxtail head this close to the squirrel's head = a catch
+const THROW_GAIN = 1.0; // ball release speed = pinch speed x this
 
-type Kind = 'acorn' | 'poop' | 'key' | 'skin';
+type Kind = 'acorn' | 'poop' | 'key' | 'skin' | 'foxtail' | 'ball';
 type Held = { kind: Kind; obj: Object3D; id?: string };
 type Hand = {
   joints: Record<string, Object3D>; ok: boolean;
   idx: Vector3; thumb: Vector3; mid: Vector3; palm: Vector3; pinch: Vector3; pIdx: Vector3; pMid: Vector3;
   vIdx: number; vMid: number; palmUp: boolean; roll: number;
-  pinching: boolean; held: Held | null; armedAt: number; petT: number; twist0: number | null;
+  pinching: boolean; held: Held | null; armedAt: number; petT: number; twist0: number | null; vPinch: Vector3; pPinch: Vector3;
 };
-type Act = 'idle' | 'greet' | 'eat' | 'full' | 'happy' | 'ouch' | 'sulk' | 'thank' | 'spin' | 'fetchGo' | 'fetchHide' | 'fetchBack' | 'offer' | 'sleep';
+type Act = 'idle' | 'greet' | 'eat' | 'full' | 'happy' | 'ouch' | 'sulk' | 'thank' | 'spin' | 'fetchGo' | 'fetchHide' | 'fetchBack' | 'offer' | 'sleep' | 'jump' | 'roll' | 'ballGo' | 'ballBack' | 'beg' | 'peek' | 'refuse';
 
 export class PetSystem extends createSystem({ planes: { required: [XRPlane] } }) {
   private stage = new Group();
@@ -72,6 +78,14 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
   private keyPalmT = 0;
   private popped: string | null = null; // skin hovering over the open chest
   private hearts: { m: Object3D; t: number }[] = [];
+  private fox = makeFoxtail();
+  private foxTip = new Vector3();
+  private catches = 0;
+  private catchAt = 0;
+  private ball = makeBall();
+  private ballVel = new Vector3();
+  private ballOn: 'box' | 'held' | 'free' | 'mouth' = 'box';
+  private ballThrown = false; // only a ball you threw gets fetched (not the one it just dropped for you)
   private act: Act = 'idle';
   private actEnd = 0;
   private actDur = 1;
@@ -109,6 +123,10 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     put(makeTree(), TREE);
     put(makeBasket(), BASKET);
     put(makeTrash(), TRASH);
+    put(makeToyBox(), TOYS);
+    put(this.fox, FOX_HOME);
+    this.fox.rotation.z = 1.2; // lying in the toy box
+    put(this.ball, BALL_HOME);
     this.chest = makeChest();
     put(this.chest.root, CHEST);
     this.sq = makeSquirrel();
@@ -148,7 +166,7 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
       const nv = () => new Vector3();
       this.hands.push({
         joints: hand.joints, ok: false, idx: nv(), thumb: nv(), mid: nv(), palm: nv(), pinch: nv(), pIdx: nv(), pMid: nv(),
-        vIdx: 0, vMid: 0, palmUp: false, roll: 0, pinching: false, held: null, armedAt: -1, petT: 0, twist0: null,
+        vIdx: 0, vMid: 0, palmUp: false, roll: 0, pinching: false, held: null, armedAt: -1, petT: 0, twist0: null, vPinch: nv(), pPinch: nv(),
       });
     }
     const onHide = () => save(this.s);
@@ -173,6 +191,8 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     for (const h of this.hands) this.readHand(h, dt);
     for (const h of this.hands) this.interact(h, dt);
     this.script();
+    this.updateFoxtail();
+    this.updateBall(dt);
     this.animate(dt);
     this.animateProps(dt);
     this.hud.draw(this.s, this.guide());
@@ -222,11 +242,13 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     h.pMid.copy(h.mid);
     loc(idx, h.idx); loc(thumb, h.thumb); loc(mid, h.mid);
     loc(j['middle-finger-metacarpal'] ?? wrist, h.palm);
+    h.pPinch.copy(h.pinch);
     h.pinch.addVectors(h.idx, h.thumb).multiplyScalar(0.5);
     if (was && dt > 0) {
+      h.vPinch.lerp(this.v.subVectors(h.pinch, h.pPinch).divideScalar(dt), 0.5);
       h.vIdx += (h.idx.distanceTo(h.pIdx) / dt - h.vIdx) * 0.5;
       h.vMid += (h.mid.distanceTo(h.pMid) / dt - h.vMid) * 0.5;
-    } else h.vIdx = h.vMid = 0;
+    } else { h.vIdx = h.vMid = 0; h.vPinch.set(0, 0, 0); }
     wrist.getWorldQuaternion(this.q);
     h.palmUp = this.v.set(0, -1, 0).applyQuaternion(this.q).y > 0.5; // WebXR: -Y of a hand joint points out of the palm
     this.v.set(1, 0, 0).applyQuaternion(this.q);
@@ -247,6 +269,9 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     else if (h.pinching && gap > PINCH_OFF) { h.pinching = false; if (h.held) this.release(h, false); }
     if (h.held) {
       h.held.obj.position.copy(h.pinch);
+      if (h.held.kind === 'foxtail') { // stem points the way the fingers point
+        this.fox.quaternion.setFromUnitVectors(this.v2.set(0, 1, 0), this.v3.subVectors(h.idx, h.palm).normalize());
+      }
       if (h.held.kind === 'key') { // turn the key at the lock
         if (h.pinch.distanceTo(this.v2.copy(CHEST).setY(0.04)) < 0.12) {
           h.twist0 ??= h.roll;
@@ -286,6 +311,8 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     if (this.keyOn === 'desk') tryItem(this.key, 'key');
     for (const p of this.poops) tryItem(p, 'poop');
     for (const [id, o] of this.skinObj) tryItem(o, 'skin', id);
+    if (this.ballOn === 'box' || this.ballOn === 'free') tryItem(this.ball, 'ball');
+    if (!h.held && !this.hands.some((o) => o.held?.kind === 'foxtail')) tryItem(this.fox, 'foxtail', undefined, 1.3);
     if (!hit && h.pinch.distanceTo(this.v2.copy(BASKET).setY(0.04)) < 0.085) {
       const a = makeAcorn();
       this.stage.add(a);
@@ -295,6 +322,8 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     h.held = hit as Held;
     h.twist0 = null;
     if (h.held.kind === 'key') this.keyOn = 'held';
+    if (h.held.kind === 'ball') this.ballOn = 'held';
+    if (h.held.kind === 'foxtail') { this.catches = 0; if (this.s.full < 20) this.refuse(); }
     if (h.held.kind === 'poop') this.poops.splice(this.poops.indexOf(h.held.obj), 1);
     if (h.held.id && h.held.id === this.popped) this.popped = null;
     if (h.held.kind === 'skin' && h.held.obj.parent !== this.stage) { // taking a worn skin off
@@ -320,6 +349,13 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     } else if (it.kind === 'key') {
       if (!lost && p.distanceTo(this.v2.copy(CHEST).setY(0.04)) < 0.12) { h.held = it; this.openChest(h); } // letting go at the lock also opens it
       else this.keyToDesk(this.v2.set(p.x, KEY_REST.y, p.z));
+    } else if (it.kind === 'foxtail') {
+      this.fox.position.copy(FOX_HOME); // back in the toy box
+      this.fox.rotation.set(0, 0, 1.2);
+    } else if (it.kind === 'ball') {
+      this.ballOn = 'free';
+      this.ballThrown = !lost;
+      this.ballVel.copy(h.vPinch).multiplyScalar(lost ? 0 : THROW_GAIN);
     } else if (it.kind === 'skin') {
       if (!lost && visible && p.distanceTo(this.v2.copy(sqPos).setY(sqPos.y + 0.1)) < 0.14) this.wear(it.id!);
       else if (it.id === 'goldFur') this.toSlot(it.id); // fur icon dropped elsewhere: just goes home
@@ -330,7 +366,7 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
   // ---------- reactions ----------
   private setAct(a: Act, dur: number) { this.act = a; this.actDur = dur; this.actEnd = this.st + dur; }
   private say(text: string, dur = 4) { this.flash = text; this.flashEnd = this.st + dur; }
-  private busy() { return this.act.startsWith('fetch') || this.act === 'offer'; }
+  private busy() { return this.act.startsWith('fetch') || this.act === 'offer' || this.act.startsWith('ball'); }
 
   private onFeed() {
     if (this.busy()) return;
@@ -371,6 +407,74 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     if (this.s.first && this.step === 4 && this.s.poops === 0) this.next(5);
     console.log(`[pet] clean poops=${this.s.poops} clean=${Math.round(this.s.clean)}`);
   }
+
+  private refuse() { // too hungry to play: points at its belly
+    this.setAct('refuse', 2);
+    sfx.no();
+    this.say('배가 고파서 못 놀겠어요. 밥 먼저 주세요!');
+  }
+
+  private onPlay(what: string) {
+    if (!play(this.s)) { this.refuse(); return; }
+    this.spawnHearts();
+    sfx.clean();
+    console.log(`[pet] play ${what} mood=${Math.round(this.s.mood)} full=${Math.round(this.s.full)}`);
+  }
+
+  /** Foxtail held: the head tracks the seed head; touching it near the head is a catch, 3 catches = happy roll. */
+  private updateFoxtail() {
+    const held = this.hands.some((h) => h.held?.kind === 'foxtail');
+    if (!held) return;
+    this.foxTip.set(0, FOXTAIL_LEN, 0);
+    this.fox.localToWorld(this.foxTip);
+    this.stage.worldToLocal(this.foxTip);
+    const root = this.sq.root.position;
+    const d = this.v.copy(root).setY(0.15).distanceTo(this.foxTip);
+    if (this.s.full < 20 || this.busy() || this.act === 'roll' || this.act === 'refuse') return;
+    if (d < CATCH_R && this.st - this.catchAt > 0.9) {
+      this.catchAt = this.st;
+      this.catches++;
+      sfx.pick();
+      console.log(`[pet] foxtail catch ${this.catches}`);
+      if (this.catches >= 3) { this.catches = 0; this.setAct('roll', 2.2); this.onPlay('foxtail'); }
+      else this.setAct('jump', 0.6);
+    }
+  }
+
+  /** Ball rolls on the desk; when it stops the squirrel fetches it back to you. Off the edge = back to the toy box. */
+  private updateBall(dt: number) {
+    const b = this.ball.position;
+    if (this.ballOn === 'free') {
+      this.ballVel.y -= 9.8 * dt;
+      b.addScaledVector(this.ballVel, dt);
+      const onDesk = Math.hypot(b.x, b.z) < EDGE;
+      if (onDesk && b.y < BALL_R) {
+        b.y = BALL_R;
+        if (this.ballVel.y < -0.3) sfx.pick();
+        this.ballVel.y = Math.abs(this.ballVel.y) > 0.3 ? -this.ballVel.y * 0.45 : 0;
+        this.ballVel.x *= 1 - Math.min(1, dt * 1.6); // rolling friction
+        this.ballVel.z *= 1 - Math.min(1, dt * 1.6);
+        this.ball.rotation.z -= this.ballVel.x * dt / BALL_R;
+        this.ball.rotation.x += this.ballVel.z * dt / BALL_R;
+      }
+      if (b.y < -0.3) { // fell off the desk: the squirrel peeks over the edge, the ball returns to the box
+        this.v.set(b.x, 0, b.z).setLength(EDGE - 0.08);
+        this.ballHome();
+        if (!this.busy()) { this.target.copy(this.v); this.setAct('peek', 3); }
+        return;
+      }
+      const resting = b.y <= BALL_R + 0.001 && Math.hypot(this.ballVel.x, this.ballVel.z) < 0.04;
+      if (resting && this.ballThrown && this.act === 'idle' && this.sq.root.visible) {
+        this.ballThrown = false;
+        if (this.s.full < 20) { this.refuse(); this.ballHome(); return; }
+        this.ballVel.set(0, 0, 0);
+        this.target.set(b.x, 0, b.z).addScaledVector(this.v.set(-b.x, 0, -b.z).normalize(), 0.03);
+        this.setAct('ballGo', 99);
+      }
+    }
+  }
+
+  private ballHome() { this.ball.removeFromParent(); this.stage.add(this.ball); this.ball.position.copy(BALL_HOME); this.ballVel.set(0, 0, 0); this.ballOn = 'box'; }
 
   private spawnPoop(i = this.poops.length) {
     const p = makePoop();
@@ -538,7 +642,7 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     if (this.act !== 'idle' && t > this.actEnd) {
       if (this.act === 'ouch') this.setAct('sulk', 3);
       else if (this.act === 'offer') { this.keyToDesk(this.v.copy(root.position).add(this.v2.set(0.06, KEY_REST.y, 0.05))); this.s.hasKey = this.s.keyGot = true; this.act = 'idle'; this.target.copy(HOME); if (s.first) this.next(6); }
-      else this.act = 'idle';
+      else { if (this.act === 'peek') this.target.copy(HOME); this.act = 'idle'; }
     }
     const a = this.act;
 
@@ -553,6 +657,20 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
       hop = Math.abs(Math.sin(t * 16)) * 0.012;
     } else if (a === 'fetchGo') { this.setAct('fetchHide', 1.6); }
     else if (a === 'fetchBack') { this.setAct('offer', 15); }
+    else if (a === 'ballGo') { // pick the ball up in the mouth and bring it to you
+      q.mouth.add(this.ball);
+      this.ball.position.set(0, 0, 0.012);
+      this.ballOn = 'mouth';
+      this.target.copy(FRONT);
+      this.setAct('ballBack', 99);
+    } else if (a === 'ballBack') { // drop it in front of you and wait for another throw
+      this.stage.add(this.ball);
+      this.ball.position.set(root.position.x, BALL_R, root.position.z + 0.05);
+      this.ballOn = 'free';
+      this.ballVel.set(0, 0, 0.0001);
+      this.setAct('beg', 4);
+      this.onPlay('ball');
+    }
     if (a === 'fetchHide' && t > this.actEnd - 0.05) { // comes back out with the key in its mouth
       q.mouth.add(this.key!);
       this.key!.position.set(0, 0, 0.008);
@@ -630,6 +748,30 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
       q.armR.rotation.set(-1.3, 0, -c);
       eyes = 'happy';
     } else if (a === 'spin') { hop = Math.abs(Math.sin(t * 8)) * 0.015; eyes = 'happy'; }
+    else if (a === 'jump') { // leap at the foxtail, paws up
+      const p = 1 - (this.actEnd - t) / this.actDur;
+      hop = Math.sin(p * Math.PI) * 0.05;
+      q.armL.rotation.set(-2.6, 0, 0.2);
+      q.armR.rotation.set(-2.6, 0, -0.2);
+      eyes = 'happy';
+    } else if (a === 'roll') { // happy roll on the desk
+      root.rotation.x = 0;
+      root.rotation.z = (1 - (this.actEnd - t) / this.actDur) * Math.PI * 4;
+      eyes = 'happy';
+    } else if (a === 'beg' || a === 'ballBack' || a === 'ballGo') {
+      q.tail.rotation.z = Math.sin(t * 14) * 0.3;
+      if (a === 'beg') { q.armL.rotation.x = q.armR.rotation.x = -1.6; hop = Math.abs(Math.sin(t * 7)) * 0.006; }
+    } else if (a === 'peek') {
+      q.head.rotation.x = 0.6; // looking down over the edge
+    } else if (a === 'refuse') {
+      q.armR.rotation.set(-0.9, 0, -0.5 + Math.sin(t * 6) * 0.25); // rubs the belly
+      q.head.rotation.z = Math.sin(t * 4) * 0.2;
+    }
+    if (a !== 'roll') root.rotation.z = 0;
+    if (a === 'idle' && this.hands.some((h) => h.held?.kind === 'foxtail') && this.s.full >= 20) { // eyes on the seed head, ready to pounce
+      this.lookAtPoint(this.foxTip);
+      if (this.foxTip.distanceTo(this.v.copy(root.position).setY(0.13)) < 0.16) { q.armL.rotation.x = q.armR.rotation.x = -2.2; root.scale.y = 1.06; }
+    }
 
     if (a === 'spin') this.yaw += dt * 8;
     else {
@@ -653,8 +795,12 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
       const d = h.idx.distanceTo(root.position);
       if (d < best) { best = d; hit = h; }
     }
-    if (!hit) return;
-    const dx = hit.idx.x - root.position.x, dy = hit.idx.y - 0.128, dz = hit.idx.z - root.position.z;
+    if (hit) this.lookAtPoint(hit.idx);
+  }
+
+  private lookAtPoint(p: Vector3) {
+    const root = this.sq.root;
+    const dx = p.x - root.position.x, dy = p.y - 0.128, dz = p.z - root.position.z;
     const yaw = Math.atan2(dx, dz) - this.yaw;
     this.sq.head.rotation.y = Math.max(-0.7, Math.min(0.7, Math.atan2(Math.sin(yaw), Math.cos(yaw))));
     this.sq.head.rotation.x = Math.max(-0.4, Math.min(0.3, -Math.atan2(dy, Math.hypot(dx, dz))));
