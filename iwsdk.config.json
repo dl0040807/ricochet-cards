@@ -14,9 +14,7 @@
       "offer": "always",
       "features": {
         "handTracking": true,
-        "anchors": true,
-        "planeDetection": true,
-        "meshDetection": true
+        "planeDetection": true
       }
     },
     "input": {
@@ -29,20 +27,20 @@
       "camera": {
         "position": [
           0,
-          1.6,
-          1
+          1.32,
+          0.1
         ],
         "lookAt": [
           0,
-          0.95,
-          -1.95
+          1.08,
+          -0.45
         ]
       }
     },
     "features": {
       "locomotion": false,
-      "grabbing": true,
-      "physics": true,
+      "grabbing": false,
+      "physics": false,
       "sceneUnderstanding": true,
       "environmentRaycast": false,
       "spatialUI": {

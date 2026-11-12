@@ -1,5 +1,5 @@
 {
-  "name": "vr-card",
+  "name": "daramji",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -19,7 +19,6 @@
     "@pmndrs/uikit": "^1.0.74",
     "@pmndrs/uikit-horizon": "^1.0.74",
     "@pmndrs/uikit-lucide": "^1.0.74",
-    "@supabase/supabase-js": "^2.119.0",
     "three": "npm:super-three@0.185.0"
   },
   "devDependencies": {
