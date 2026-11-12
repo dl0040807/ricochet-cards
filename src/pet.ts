@@ -429,7 +429,15 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     console.log(`[pet] feed full=${Math.round(this.s.full)} act=${this.act}`);
   }
 
+  private sulkPets = 0;
   private onPet() {
+    if (this.act === 'sulk' && this.sulkPets++ === 0) { // after a flick: pretends to be cross once, then melts
+      this.setAct('sulk', 2);
+      this.say('흥! ...', 1.5);
+      sfx.no();
+      return;
+    }
+    this.sulkPets = 0;
     pet(this.s);
     if (!this.busy()) this.setAct('happy', 1.5);
     this.spawnHearts();
@@ -441,6 +449,7 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
   private onFlick() {
     flick(this.s);
     if (!this.busy()) this.setAct('ouch', 1);
+    this.sulkPets = 0;
     sfx.ouch();
     this.say('아야!', 2);
     console.log(`[pet] flick mood=${Math.round(this.s.mood)}`);
@@ -641,7 +650,7 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     if (quiet) return;
     this.setAct('spin', 1.6);
     sfx.wear();
-    if (this.s.first && this.step === 7) { this.s.first = false; this.step = 8; this.say('다람쥐는 가끔 새 열쇠를 물고 와요. 내일 또 만나요!', 20); }
+    if (this.s.first && this.step === 7) { this.s.first = false; this.step = 8; this.say(`옷장 빈칸이 ${SKIN_IDS.length - this.s.owned.length}개 남았어요. ${this.s.name}는 가끔 새 열쇠를 물고 와요. 내일 또 만나요!`, 20); }
     this.save();
     console.log(`[pet] wear ${id} worn=${this.s.worn.join(',')}`);
   }
@@ -689,7 +698,8 @@ export class PetSystem extends createSystem({ planes: { required: [XRPlane] } })
     if (s.full < 30) return '배고파해요. 도토리를 집어서 주세요';
     if (s.poops > 0) return '똥을 집어서 쓰레기통에 버려 주세요';
     if (s.mood < 50) return '시무룩해요. 쓰다듬어 주세요';
-    return s.keyToday && !s.keyGot ? '기분이 좋아 보여요. 뭔가 가져올지도 몰라요' : '오늘도 와 줘서 고마워요!';
+    if (s.keyToday && !s.keyGot) return `${s.name}의 기분이 좋아 보여요. 뭔가 가져올지도 몰라요`;
+    return s.owned.length < SKIN_IDS.length ? `옷장 ${s.owned.length}/${SKIN_IDS.length}칸. ${s.name}는 가끔 새 열쇠를 물고 와요` : '옷장을 다 채웠어요! 오늘도 와 줘서 고마워요';
   }
 
   // ---------- animation (all poses are code-driven) ----------
