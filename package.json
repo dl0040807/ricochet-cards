@@ -1,5 +1,5 @@
 {
-  "name": "daramji",
+  "name": "vrdiary",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,9 +13,10 @@
     "typecheck": "tsc --noEmit",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "node scripts/state-check.ts"
+    "sample-depth": "node scripts/sample-depth.mjs"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.3.2",
     "@iwsdk/core": "1.1.0-rc.2",
     "@pmndrs/uikit": "^1.0.74",
     "@pmndrs/uikit-horizon": "^1.0.74",
