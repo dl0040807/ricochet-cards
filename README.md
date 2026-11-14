@@ -1,45 +1,50 @@
-# IWSDK App
+# VR Diary
 
-This project uses `iwsdk.config.json` for declarative scene, asset, component,
-XR, and emulator configuration. Application systems remain explicit in
-`src/index.ts`.
+A 30-second mixed-reality diary for Meta Quest 3. Your desk becomes the
+diary: pick a mood orb, write one line, drop in today's photo, and the
+calendar fills with color. Old days open as 2.5D photos you can step inside.
+
+Live: https://vrdiary.vercel.app
+
+## How it works
+
+1. **Before VR (2D screen):** pick today's photo. Depth Anything V2 (small,
+   via Transformers.js) turns it into a depth map right in the browser — no
+   server, no upload.
+2. **In VR (passthrough):** a diary card and a calendar sit on your desk.
+   Pinch a date to open it, swipe to change months, pinch today to record.
+3. **Record:** drop a mood orb on the card → type one line on the poke
+   keyboard (or use a quick phrase) → drop the photo on today → Save.
+4. **Memories:** "A week ago today" opens as a 2.5D frame. Spread it with both
+   hands or press *Step inside*; push with an open palm to close.
+
+Everything is stored locally in IndexedDB. 12 sample diaries are included so
+the calendar is not empty on first run.
+
+## Run
 
 ```sh
 npm install
 npm run dev
 ```
 
-Use the Runtime and Editor controls in the managed browser to switch between
-the running experience and its authored scene.
+The dev server is managed by the IWSDK CLI and opens an XR emulator (IWER) in
+a managed browser. `iwsdk.config.json` is the project config. To test on a
+Quest, open a URL from `npx @iwsdk/cli dev status` on the same Wi-Fi.
 
-## Starter content
+## Code
 
-The robot and welcome panel are small examples of authored scene content plus
-runtime systems. The robot turns toward the player's head and plays a sound
-when pressed. To remove the robot, delete its scene node, its `RobotSystem`
-registration from `src/index.ts` or `src/index.js`, and its `Robot` registration
-from `src/components.ts` or `src/components.js`; you can then delete the unused
-robot component and system files. To remove the welcome panel, delete its scene
-node and its `PanelSystem` registration from the application entry point.
+| File | What |
+| --- | --- |
+| `index.html` | 2D intro: photo pick and depth preview |
+| `src/index.ts` | World setup, photo → depth pipeline |
+| `src/diary.ts` | Desk, calendar, record flow, memories, hand input |
+| `src/panel.ts` | Canvas-drawn panels with pinchable buttons |
+| `src/depth.ts` | In-browser depth estimation |
+| `src/photo3d.ts` | Depth-displaced 2.5D photo mesh |
+| `src/db.ts` | IndexedDB entries |
+| `src/samples.ts` | Sample diaries |
+| `src/audio.ts` | Sound effects and mood pads |
 
-The robot stands on the second of three numbered stations. The first holds dark
-pieces you can grab and move, and the third holds a ring you can spin in place.
-The studio props (the plinths and the dark pieces, plus the floor and stage in VR
-and Desktop 3D) are built in code in `src/scene-assets/studio.scene-asset.ts` or
-`.js`. The VR and Desktop 3D background furniture is built the same way in
-`src/scene-assets/decor.scene-asset.ts` or `.js`, so the starter downloads no
-extra models. To remove any of them, delete their scene nodes and their entries
-in `src/assets.ts` or `src/assets.js`, then delete the files you no longer use.
-The station labels are `public/ui/label-*.uikitml`.
-
-The rest of the look is built-in components in the scene, which you can edit in
-the editor without code. The soft light on every object is the scene root's
-`IBLGradient` (select the Level Root to edit it), and the soft shadows under
-each object are `ContactShadow` nodes. In VR and Desktop 3D, the sky is the
-scene root's `DomeGradient` (its colors, tilt and dither are also on the Level
-Root), and the floor fades into it through the `DomeFade` on the floor node. AR
-projects have no sky or floor, so passthrough stays visible, and a
-`ShadowCatcher` node grounds the stations.
-
-- Minimal scene walkthrough: https://iwsdk.dev/guides/01b-minimal-scene.html
-- XR-enabled projects — IWER emulator controls: https://iwsdk.dev/guides/02-testing-experience.html#iwer-controls
+Real sample photos go in `public/samples/NN.jpg`; run `npm run sample-depth`
+to precompute their depth maps.
